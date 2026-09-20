@@ -1,39 +1,86 @@
 import 'package:flutter/material.dart';
+import 'package:get/get.dart';
 import 'package:intl/intl.dart';
 import '../Controllers/order_controller.dart';
+import '../Controllers/review_controller.dart';
+import '../Controllers/user_profile_controller.dart';
+import '../widgets/product_image.dart';
 
 class OrderDetailsScreen extends StatelessWidget {
   const OrderDetailsScreen({super.key, required this.order});
 
   final Order order;
 
-  static const Color primaryColor = Color(0xFFFF5200);
-
-  String _formatDate(DateTime date) {
-    return DateFormat('MMM dd, yyyy • hh:mm a').format(date);
-  }
+  String _formatDate(DateTime date) => DateFormat('MMM dd, yyyy • hh:mm a').format(date);
 
   String _formatPrice(double price) => '\$${price.toStringAsFixed(2)}';
 
+  Future<void> _writeReview(BuildContext context, String productId, String productName) async {
+    double rating = 5;
+    final commentCtrl = TextEditingController();
+
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setState) => AlertDialog(
+          title: Text('Review $productName'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: List.generate(5, (i) {
+                  final starValue = i + 1;
+                  return IconButton(
+                    icon: Icon(
+                      starValue <= rating ? Icons.star : Icons.star_border,
+                      color: Colors.amber,
+                    ),
+                    onPressed: () => setState(() => rating = starValue.toDouble()),
+                  );
+                }),
+              ),
+              TextField(
+                controller: commentCtrl,
+                maxLines: 3,
+                decoration: const InputDecoration(hintText: 'Share your experience...'),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Submit'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (result != true || !context.mounted) return;
+
+    final profile = UserProfileController.instance.currentProfile.value;
+    await ReviewController.instance.submitReview(
+      orderId: order.id,
+      productId: productId,
+      userName: profile?.fullName ?? 'Anonymous',
+      rating: rating,
+      comment: commentCtrl.text,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return Scaffold(
-      backgroundColor: Colors.white,
       appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.black),
-          onPressed: () => Navigator.pop(context),
-        ),
-        title: Text(
-          'Order #${order.id.substring(0, 8)}',
-          style: const TextStyle(
-            color: Colors.black,
-            fontSize: 18,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
+        leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => Get.back()),
+        title: Text('Order #${order.id.substring(0, order.id.length >= 8 ? 8 : order.id.length)}'),
         centerTitle: false,
       ),
       body: SingleChildScrollView(
@@ -41,195 +88,158 @@ class OrderDetailsScreen extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Status & date
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: order.statusColor.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(20),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: order.statusColor.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.circle, size: 10, color: order.statusColor),
+                      const SizedBox(width: 6),
+                      Text(
+                        order.statusString,
+                        style: TextStyle(
+                          color: order.statusColor,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 12,
+                        ),
                       ),
-                      child: Row(
-                        children: [
-                          Icon(Icons.circle, size: 10, color: order.statusColor),
-                          const SizedBox(width: 6),
-                          Text(
-                            order.statusString,
-                            style: TextStyle(
-                              color: order.statusColor,
-                              fontWeight: FontWeight.w600,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
                 Text(
                   _formatDate(order.createdAt),
-                  style: const TextStyle(fontSize: 13, color: Colors.grey),
+                  style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
                 ),
               ],
             ),
             const SizedBox(height: 20),
 
-            // Shipping address
-            const Text(
-              'Shipping Address',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-            ),
+            Text('Shipping Address', style: theme.textTheme.titleMedium),
             const SizedBox(height: 8),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.grey[100],
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Icon(Icons.location_on, color: Colors.red),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      order.shippingAddress ?? 'Not specified',
-                      style: const TextStyle(fontSize: 14, color: Colors.black87, height: 1.4),
-                    ),
-                  ),
-                ],
-              ),
+            _InfoCard(
+              icon: Icons.location_on,
+              iconColor: Colors.red,
+              text: order.shippingAddress ?? 'Not specified',
             ),
             const SizedBox(height: 16),
 
-            // Payment method
-            const Text(
-              'Payment Method',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-            ),
+            Text('Payment Method', style: theme.textTheme.titleMedium),
             const SizedBox(height: 8),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.grey[100],
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.credit_card, color: Colors.blue),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      order.paymentMethod ?? 'Not specified',
-                      style: const TextStyle(fontSize: 14, color: Colors.black87),
-                    ),
-                  ),
-                ],
-              ),
+            _InfoCard(
+              icon: Icons.credit_card,
+              iconColor: Colors.blue,
+              text: order.paymentMethod ?? 'Not specified',
             ),
             const SizedBox(height: 20),
 
-            // Items
-            const Text(
-              'Items',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-            ),
+            Text('Items', style: theme.textTheme.titleMedium),
             const SizedBox(height: 8),
             ...order.items.map((item) {
               return Container(
                 margin: const EdgeInsets.only(bottom: 10),
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: theme.cardColor,
                   borderRadius: BorderRadius.circular(12),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withOpacity(0.03),
+                      color: Colors.black.withValues(alpha: 0.03),
                       blurRadius: 6,
                       offset: const Offset(0, 2),
                     ),
                   ],
                 ),
-                child: Row(
+                child: Column(
                   children: [
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(8),
-                      child: Image.asset(
-                        item.imagePath,
-                        width: 60,
-                        height: 60,
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => Container(
-                          width: 60,
-                          height: 60,
-                          color: Colors.grey[300],
-                          alignment: Alignment.center,
-                          child: const Icon(Icons.broken_image, color: Colors.grey),
+                    Row(
+                      children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: ProductImage(path: item.imagePath, width: 60, height: 60),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                item.productName,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.bodyMedium?.copyWith(
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                'Size: ${item.selectedSize}  •  Qty: ${item.quantity}',
+                                style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          _formatPrice(item.price * item.quantity),
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            fontWeight: FontWeight.bold,
+                            color: theme.colorScheme.primary,
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (order.status == OrderStatus.delivered) ...[
+                      const SizedBox(height: 8),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: TextButton.icon(
+                          onPressed: () => _writeReview(context, item.productId, item.productName),
+                          icon: const Icon(Icons.rate_review_outlined, size: 16),
+                          label: const Text('Write a Review'),
                         ),
                       ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            item.productName,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            'Size: ${item.selectedSize}  •  Qty: ${item.quantity}',
-                            style: const TextStyle(fontSize: 12, color: Colors.grey),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      _formatPrice(item.price * item.quantity),
-                      style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.bold,
-                        color: primaryColor,
-                      ),
-                    ),
+                    ],
                   ],
                 ),
               );
-            }).toList(),
+            }),
             const SizedBox(height: 20),
 
-            // Summary
-            const Text(
-              'Order Summary',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-            ),
+            Text('Order Summary', style: theme.textTheme.titleMedium),
             const SizedBox(height: 8),
             Container(
               width: double.infinity,
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.grey[100],
+                color: theme.colorScheme.surfaceContainerHighest,
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Column(
                 children: [
-                  _buildSummaryRow('Items (${order.items.length})',
-                      _formatPrice(order.totalAmount)),
+                  _SummaryRow(label: 'Subtotal', value: _formatPrice(order.subtotal)),
                   const SizedBox(height: 4),
-                  _buildSummaryRow('Status', order.statusString),
+                  _SummaryRow(label: 'Shipping', value: _formatPrice(order.shippingFee)),
+                  const SizedBox(height: 4),
+                  _SummaryRow(label: 'Tax', value: _formatPrice(order.taxAmount)),
+                  if (order.discountAmount > 0) ...[
+                    const SizedBox(height: 4),
+                    _SummaryRow(
+                      label: order.couponId != null
+                          ? 'Discount (${order.couponId})'
+                          : 'Discount',
+                      value: '-${_formatPrice(order.discountAmount)}',
+                    ),
+                  ],
+                  const Divider(height: 20),
+                  _SummaryRow(label: 'Total', value: _formatPrice(order.totalAmount)),
+                  const SizedBox(height: 4),
+                  _SummaryRow(label: 'Status', value: order.statusString),
                 ],
               ),
             ),
@@ -238,26 +248,52 @@ class OrderDetailsScreen extends StatelessWidget {
       ),
     );
   }
+}
 
-  Widget _buildSummaryRow(String label, String value) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Text(
-          label,
-          style: const TextStyle(fontSize: 14, color: Colors.black87),
-        ),
-        Text(
-          value,
-          style: const TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-      ],
+class _InfoCard extends StatelessWidget {
+  const _InfoCard({required this.icon, required this.iconColor, required this.text});
+
+  final IconData icon;
+  final Color iconColor;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: iconColor),
+          const SizedBox(width: 8),
+          Expanded(child: Text(text, style: theme.textTheme.bodyMedium?.copyWith(height: 1.4))),
+        ],
+      ),
     );
   }
 }
 
+class _SummaryRow extends StatelessWidget {
+  const _SummaryRow({required this.label, required this.value});
 
+  final String label;
+  final String value;
 
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(label, style: theme.textTheme.bodyMedium),
+        Text(value, style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.bold)),
+      ],
+    );
+  }
+}

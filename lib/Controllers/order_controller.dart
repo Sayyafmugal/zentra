@@ -1,162 +1,32 @@
 // order_controller.dart
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:get/get.dart';
-import 'package:flutter/material.dart';
-import '../view/product_model.dart';
+import '../models/order.dart';
+import '../repositories/order_repository.dart';
 import 'cart_controller.dart';
 
-class OrderItem {
-  final String productId;
-  final String productName;
-  final String imagePath;
-  final double price;
-  final int quantity;
-  final String selectedSize;
-
-  OrderItem({
-    required this.productId,
-    required this.productName,
-    required this.imagePath,
-    required this.price,
-    required this.quantity,
-    required this.selectedSize,
-  });
-
-  Map<String, dynamic> toMap() {
-    return {
-      'productId': productId,
-      'productName': productName,
-      'imagePath': imagePath,
-      'price': price,
-      'quantity': quantity,
-      'selectedSize': selectedSize,
-    };
-  }
-
-  factory OrderItem.fromMap(Map<String, dynamic> map) {
-    return OrderItem(
-      productId: map['productId'] ?? '',
-      productName: map['productName'] ?? '',
-      imagePath: map['imagePath'] ?? '',
-      price: (map['price'] ?? 0.0).toDouble(),
-      quantity: map['quantity'] ?? 1,
-      selectedSize: map['selectedSize'] ?? '',
-    );
-  }
-}
-
-enum OrderStatus {
-  pending,
-  processing,
-  shipped,
-  delivered,
-  cancelled,
-}
-
-class Order {
-  final String id;
-  final String userId;
-  final List<OrderItem> items;
-  final double totalAmount;
-  final OrderStatus status;
-  final String? shippingAddress;
-  final String? paymentMethod;
-  final DateTime createdAt;
-  final DateTime? updatedAt;
-
-  Order({
-    required this.id,
-    required this.userId,
-    required this.items,
-    required this.totalAmount,
-    required this.status,
-    this.shippingAddress,
-    this.paymentMethod,
-    required this.createdAt,
-    this.updatedAt,
-  });
-
-  Map<String, dynamic> toMap() {
-    return {
-      'id': id,
-      'userId': userId,
-      'items': items.map((item) => item.toMap()).toList(),
-      'totalAmount': totalAmount,
-      'status': status.name,
-      'shippingAddress': shippingAddress,
-      'paymentMethod': paymentMethod,
-      'createdAt': Timestamp.fromDate(createdAt),
-      'updatedAt': updatedAt != null ? Timestamp.fromDate(updatedAt!) : null,
-    };
-  }
-
-  factory Order.fromMap(Map<String, dynamic> map) {
-    return Order(
-      id: map['id'] ?? '',
-      userId: map['userId'] ?? '',
-      items: (map['items'] as List<dynamic>?)
-              ?.map((item) => OrderItem.fromMap(item as Map<String, dynamic>))
-              .toList() ??
-          [],
-      totalAmount: (map['totalAmount'] ?? 0.0).toDouble(),
-      status: OrderStatus.values.firstWhere(
-        (e) => e.name == map['status'],
-        orElse: () => OrderStatus.pending,
-      ),
-      shippingAddress: map['shippingAddress'],
-      paymentMethod: map['paymentMethod'],
-      createdAt: (map['createdAt'] as Timestamp).toDate(),
-      updatedAt: map['updatedAt'] != null
-          ? (map['updatedAt'] as Timestamp).toDate()
-          : null,
-    );
-  }
-
-  factory Order.fromFirestore(DocumentSnapshot doc) {
-    final data = doc.data() as Map<String, dynamic>;
-    return Order.fromMap(data);
-  }
-
-  String get statusString {
-    switch (status) {
-      case OrderStatus.pending:
-        return 'Pending';
-      case OrderStatus.processing:
-        return 'Processing';
-      case OrderStatus.shipped:
-        return 'Shipped';
-      case OrderStatus.delivered:
-        return 'Delivered';
-      case OrderStatus.cancelled:
-        return 'Cancelled';
-    }
-  }
-
-  Color get statusColor {
-    switch (status) {
-      case OrderStatus.pending:
-        return Colors.orange;
-      case OrderStatus.processing:
-        return Colors.blue;
-      case OrderStatus.shipped:
-        return Colors.purple;
-      case OrderStatus.delivered:
-        return Colors.green;
-      case OrderStatus.cancelled:
-        return Colors.red;
-    }
-  }
-}
+export '../models/order.dart';
 
 class OrderController extends GetxController {
+  OrderController({OrderRepository? repository, FirebaseAuth? auth})
+    : _repository = repository ?? OrderRepository(),
+      _auth = auth ?? FirebaseAuth.instance;
+
   static OrderController get instance => Get.find();
 
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final FirebaseAuth _auth = FirebaseAuth.instance;
+  final OrderRepository _repository;
+  final FirebaseAuth _auth;
 
   final RxList<Order> orders = <Order>[].obs;
+  final RxList<Order> sellerOrders = <Order>[].obs;
+  // Platform-wide order list, for the admin order management screen —
+  // distinct from [orders] above, same reasoning as [platformOrderCount].
+  final RxList<Order> allOrders = <Order>[].obs;
   final RxBool isLoading = false.obs;
+  // Platform-wide total, for the admin dashboard stat card — distinct from
+  // [orders] above, which is always scoped to the current signed-in user
+  // (an admin's own personal order history, not the whole platform's).
+  final RxInt platformOrderCount = 0.obs;
 
   String? get currentUserId => _auth.currentUser?.uid;
 
@@ -182,32 +52,23 @@ class OrderController extends GetxController {
 
       isLoading.value = true;
 
-      final orderId = _firestore.collection('orders').doc().id;
       final order = Order(
-        id: orderId,
+        id: _repository.newOrderId(),
         userId: currentUserId!,
         items: items,
         totalAmount: totalAmount,
-        status: OrderStatus.pending,
+        status: OrderStatus.pendingPayment,
         shippingAddress: shippingAddress,
         paymentMethod: paymentMethod,
         createdAt: DateTime.now(),
       );
 
-      await _firestore.collection('orders').doc(orderId).set(order.toMap());
+      await _repository.createOrder(order);
 
       orders.insert(0, order);
       isLoading.value = false;
 
-      // Clear cart after order creation
       await CartController.instance.clearCart();
-
-      Get.snackbar(
-        'Order Placed!',
-        'Your order has been placed successfully',
-        backgroundColor: Colors.green,
-        colorText: Colors.white,
-      );
 
       return null;
     } catch (e) {
@@ -217,35 +78,50 @@ class OrderController extends GetxController {
   }
 
   // Create order from cart
+  // Prices, product availability, and stock are all re-checked against
+  // Firestore inside a transaction (see OrderRepository.createOrderFromCart)
+  // rather than trusted from the client-held cart — this is the actual
+  // "never trust the client" boundary for checkout, not just a UI nicety.
   Future<String?> createOrderFromCart({
     String? shippingAddress,
     String? paymentMethod,
+    PaymentStatus paymentStatus = PaymentStatus.pending,
+    String? couponCode,
   }) async {
+    if (currentUserId == null) {
+      return 'Please login to create an order';
+    }
+
+    final cartController = CartController.instance;
+    if (cartController.cartItems.isEmpty) {
+      return 'Cart is empty';
+    }
+
     try {
-      final cartController = CartController.instance;
-      if (cartController.cartItems.isEmpty) {
-        return 'Cart is empty';
-      }
+      isLoading.value = true;
 
-      final orderItems = cartController.cartItems.map((cartItem) {
-        return OrderItem(
-          productId: cartItem.product.id,
-          productName: cartItem.product.name,
-          imagePath: cartItem.product.imagePath,
-          price: cartItem.product.currentPrice,
-          quantity: cartItem.quantity,
-          selectedSize: cartItem.selectedSize,
-        );
-      }).toList();
-
-      return await createOrder(
-        items: orderItems,
-        totalAmount: cartController.totalPrice,
+      final order = await _repository.createOrderFromCart(
+        orderId: _repository.newOrderId(),
+        userId: currentUserId!,
+        cartItems: cartController.cartItems,
         shippingAddress: shippingAddress,
         paymentMethod: paymentMethod,
+        paymentStatus: paymentStatus,
+        couponCode: couponCode,
       );
+
+      orders.insert(0, order);
+      isLoading.value = false;
+
+      await cartController.clearCart();
+
+      return null;
+    } on OrderValidationException catch (e) {
+      isLoading.value = false;
+      return e.message;
     } catch (e) {
-      return 'Failed to create order from cart: $e';
+      isLoading.value = false;
+      return 'Failed to create order: $e';
     }
   }
 
@@ -255,53 +131,57 @@ class OrderController extends GetxController {
       if (currentUserId == null) return;
 
       isLoading.value = true;
-
-      final snapshot = await _firestore
-          .collection('orders')
-          .where('userId', isEqualTo: currentUserId)
-          .orderBy('createdAt', descending: true)
-          .get();
-
-      orders.value = snapshot.docs
-          .map((doc) => Order.fromFirestore(doc))
-          .toList();
-
+      orders.value = await _repository.fetchOrders(currentUserId!);
       isLoading.value = false;
     } catch (e) {
       isLoading.value = false;
-      Get.snackbar(
-        'Error',
-        'Failed to fetch orders: $e',
-        backgroundColor: Colors.red,
-        colorText: Colors.white,
-      );
     }
   }
 
-  // Stream orders for real-time updates
+  /// Orders containing at least one of this seller's items. The full order
+  /// (possibly with other sellers' items too) is returned — a seller-facing
+  /// screen should display only `order.itemsForSeller(sellerId)`, never the
+  /// raw `items` list, so one seller never sees another's line items.
+  Future<void> fetchSellerOrders(String sellerId) async {
+    try {
+      isLoading.value = true;
+      sellerOrders.value = await _repository.fetchOrdersForSeller(sellerId);
+      isLoading.value = false;
+    } catch (e) {
+      isLoading.value = false;
+    }
+  }
+
+  /// Admin-only in practice — see OrderRepository.fetchAllOrders.
+  Future<void> fetchAllOrders() async {
+    try {
+      isLoading.value = true;
+      allOrders.value = await _repository.fetchAllOrders();
+      isLoading.value = false;
+    } catch (e) {
+      isLoading.value = false;
+    }
+  }
+
+  /// Admin-only in practice: firestore.rules only lets an unfiltered read of
+  /// every order through for isAdmin() — anyone else's count aggregation
+  /// query would be rejected the same way a raw fetch-all would be.
+  Future<void> fetchPlatformOrderCount() async {
+    try {
+      platformOrderCount.value = await _repository.countAllOrders();
+    } catch (e) {
+      // Leave the previous value in place; the stat card just won't update.
+    }
+  }
+
   Stream<List<Order>> getOrdersStream() {
-    if (currentUserId == null) {
-      return Stream.value([]);
-    }
-
-    return _firestore
-        .collection('orders')
-        .where('userId', isEqualTo: currentUserId)
-        .orderBy('createdAt', descending: true)
-        .snapshots()
-        .map((snapshot) => snapshot.docs
-            .map((doc) => Order.fromFirestore(doc))
-            .toList());
+    if (currentUserId == null) return Stream.value([]);
+    return _repository.watchOrders(currentUserId!);
   }
 
-  // Get order by ID
   Future<Order?> getOrderById(String orderId) async {
     try {
-      final doc = await _firestore.collection('orders').doc(orderId).get();
-      if (doc.exists) {
-        return Order.fromFirestore(doc);
-      }
-      return null;
+      return await _repository.getOrderById(orderId);
     } catch (e) {
       return null;
     }
@@ -310,38 +190,30 @@ class OrderController extends GetxController {
   // ==================== UPDATE ====================
   Future<String?> updateOrderStatus(String orderId, OrderStatus newStatus) async {
     try {
-      isLoading.value = true;
+      final current =
+          orders.firstWhereOrNull((o) => o.id == orderId) ??
+          await _repository.getOrderById(orderId);
+      if (current == null) return 'Order not found';
+      if (!isValidOrderStatusTransition(current.status, newStatus)) {
+        return 'Cannot move an order from ${current.statusString} to a ${newStatus.name} state';
+      }
 
-      await _firestore.collection('orders').doc(orderId).update({
-        'status': newStatus.name,
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
+      isLoading.value = true;
+      await _repository.updateOrderStatus(orderId, newStatus);
 
       final index = orders.indexWhere((order) => order.id == orderId);
       if (index != -1) {
-        final order = orders[index];
-        orders[index] = Order(
-          id: order.id,
-          userId: order.userId,
-          items: order.items,
-          totalAmount: order.totalAmount,
+        orders[index] = orders[index].copyWith(status: newStatus, updatedAt: DateTime.now());
+      }
+      final allIndex = allOrders.indexWhere((order) => order.id == orderId);
+      if (allIndex != -1) {
+        allOrders[allIndex] = allOrders[allIndex].copyWith(
           status: newStatus,
-          shippingAddress: order.shippingAddress,
-          paymentMethod: order.paymentMethod,
-          createdAt: order.createdAt,
           updatedAt: DateTime.now(),
         );
-        orders.refresh();
       }
 
       isLoading.value = false;
-
-      Get.snackbar(
-        'Updated',
-        'Order status updated to ${newStatus.name}',
-        backgroundColor: Colors.green,
-        colorText: Colors.white,
-      );
 
       return null;
     } catch (e) {
@@ -350,27 +222,61 @@ class OrderController extends GetxController {
     }
   }
 
-  // Cancel order
   Future<String?> cancelOrder(String orderId) async {
     return await updateOrderStatus(orderId, OrderStatus.cancelled);
+  }
+
+  /// A seller advancing fulfillment on their own order (processing → packed
+  /// → shipped → delivered). Restricted to orders containing only that
+  /// seller's items and to [isValidSellerOrderTransition] — enforced again
+  /// in firestore.rules, this check is the UX-side mirror of it, not the
+  /// security boundary.
+  Future<String?> updateOrderStatusAsSeller(
+    String orderId,
+    OrderStatus newStatus,
+    String sellerId,
+  ) async {
+    try {
+      final current =
+          sellerOrders.firstWhereOrNull((o) => o.id == orderId) ??
+          await _repository.getOrderById(orderId);
+      if (current == null) return 'Order not found';
+
+      if (current.sellerIds.length != 1 || !current.sellerIds.contains(sellerId)) {
+        return 'This order includes another seller\'s items — only an admin can update it.';
+      }
+      if (!isValidSellerOrderTransition(current.status, newStatus)) {
+        return 'Cannot move an order from ${current.statusString} to a ${newStatus.name} state';
+      }
+
+      isLoading.value = true;
+      await _repository.updateOrderStatus(orderId, newStatus);
+
+      final index = sellerOrders.indexWhere((order) => order.id == orderId);
+      if (index != -1) {
+        sellerOrders[index] = sellerOrders[index].copyWith(
+          status: newStatus,
+          updatedAt: DateTime.now(),
+        );
+      }
+
+      isLoading.value = false;
+
+      return null;
+    } catch (e) {
+      isLoading.value = false;
+      return 'Failed to update order: $e';
+    }
   }
 
   // ==================== DELETE ====================
   Future<String?> deleteOrder(String orderId) async {
     try {
       isLoading.value = true;
-
-      await _firestore.collection('orders').doc(orderId).delete();
+      await _repository.deleteOrder(orderId);
 
       orders.removeWhere((order) => order.id == orderId);
       isLoading.value = false;
-
-      Get.snackbar(
-        'Deleted',
-        'Order deleted successfully',
-        backgroundColor: Colors.green,
-        colorText: Colors.white,
-      );
 
       return null;
     } catch (e) {
@@ -379,5 +285,3 @@ class OrderController extends GetxController {
     }
   }
 }
-
-

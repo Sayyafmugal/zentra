@@ -1,65 +1,58 @@
 import 'package:flutter/material.dart';
+import 'package:get/get.dart';
+import 'package:lottie/lottie.dart';
+import '../routes/app_routes.dart';
 
 class OrderConfirmationScreen extends StatelessWidget {
   final double totalAmount;
-  static const Color primaryColor = Color(0xFFFF5200);
 
-  const OrderConfirmationScreen({
-    super.key,
-    required this.totalAmount,
-  });
+  const OrderConfirmationScreen({super.key, required this.totalAmount});
 
   String _formatPrice(double price) => '\$${price.toStringAsFixed(2)}';
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return Scaffold(
-      backgroundColor: Colors.white,
       body: Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const Icon(Icons.check_circle, color: Colors.green, size: 90),
-              const SizedBox(height: 24),
-              const Text(
-                'Order Confirmed!',
-                style: TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
+              SizedBox(
+                height: 180,
+                child: Lottie.asset(
+                  'assets/animations/order_success.json',
+                  repeat: false,
+                  errorBuilder: (_, __, ___) =>
+                      const Icon(Icons.check_circle, color: Colors.green, size: 90),
                 ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'Order Confirmed!',
+                style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 12),
               Text(
                 'Your order has been placed successfully.\nThank you for shopping with us!',
                 textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.grey[700], fontSize: 16),
+                style: theme.textTheme.bodyLarge?.copyWith(color: theme.hintColor),
               ),
               const SizedBox(height: 20),
               Text(
                 'Total: ${_formatPrice(totalAmount)}',
-                style: const TextStyle(
-                  fontSize: 18,
+                style: theme.textTheme.titleLarge?.copyWith(
                   fontWeight: FontWeight.bold,
-                  color: primaryColor,
+                  color: theme.colorScheme.primary,
                 ),
               ),
               const SizedBox(height: 40),
               ElevatedButton.icon(
-                onPressed: () {
-                  Navigator.popUntil(context, (route) => route.isFirst);
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: primaryColor,
-                  padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 14),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                ),
-                icon: const Icon(Icons.shopping_bag_outlined, color: Colors.white),
-                label: const Text(
-                  'Continue Shopping',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
-                ),
+                onPressed: () => Get.offAllNamed(AppRoutes.main),
+                icon: const Icon(Icons.shopping_bag_outlined),
+                label: const Text('Continue Shopping'),
               ),
             ],
           ),

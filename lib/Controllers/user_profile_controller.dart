@@ -1,88 +1,57 @@
 // user_profile_controller.dart
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:get/get.dart';
-import 'package:flutter/material.dart';
+import '../models/audit_log_entry.dart';
+import '../models/user_profile.dart';
+import '../repositories/audit_log_repository.dart';
+import '../repositories/user_profile_repository.dart';
 
-class UserProfile {
-  final String uid;
-  final String fullName;
-  final String email;
-  final String? phone;
-  final String? photoUrl;
-  final DateTime createdAt;
-  final DateTime? updatedAt;
-
-  UserProfile({
-    required this.uid,
-    required this.fullName,
-    required this.email,
-    this.phone,
-    this.photoUrl,
-    required this.createdAt,
-    this.updatedAt,
-  });
-
-  Map<String, dynamic> toMap() {
-    return {
-      'uid': uid,
-      'fullName': fullName,
-      'email': email,
-      'phone': phone,
-      'photoUrl': photoUrl,
-      'createdAt': Timestamp.fromDate(createdAt),
-      'updatedAt': updatedAt != null ? Timestamp.fromDate(updatedAt!) : null,
-    };
-  }
-
-  factory UserProfile.fromMap(Map<String, dynamic> map) {
-    return UserProfile(
-      uid: map['uid'] ?? '',
-      fullName: map['fullName'] ?? '',
-      email: map['email'] ?? '',
-      phone: map['phone'],
-      photoUrl: map['photoUrl'],
-      createdAt: (map['createdAt'] as Timestamp).toDate(),
-      updatedAt: map['updatedAt'] != null ? (map['updatedAt'] as Timestamp).toDate() : null,
-    );
-  }
-
-  factory UserProfile.fromFirestore(DocumentSnapshot doc) {
-    final data = doc.data() as Map<String, dynamic>;
-    return UserProfile.fromMap(data);
-  }
-
-  UserProfile copyWith({
-    String? uid,
-    String? fullName,
-    String? email,
-    String? phone,
-    String? photoUrl,
-    DateTime? createdAt,
-    DateTime? updatedAt,
-  }) {
-    return UserProfile(
-      uid: uid ?? this.uid,
-      fullName: fullName ?? this.fullName,
-      email: email ?? this.email,
-      phone: phone ?? this.phone,
-      photoUrl: photoUrl ?? this.photoUrl,
-      createdAt: createdAt ?? this.createdAt,
-      updatedAt: updatedAt ?? this.updatedAt,
-    );
-  }
-}
+export '../models/user_profile.dart';
 
 class UserProfileController extends GetxController {
+  UserProfileController({
+    UserProfileRepository? repository,
+    FirebaseAuth? auth,
+    AuditLogRepository? auditLogRepository,
+  }) : _repository = repository ?? UserProfileRepository(),
+       _auth = auth ?? FirebaseAuth.instance,
+       _auditLog = auditLogRepository ?? AuditLogRepository();
+
   static UserProfileController get instance => Get.find();
 
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final FirebaseAuth _auth = FirebaseAuth.instance;
+  final UserProfileRepository _repository;
+  final FirebaseAuth _auth;
+  final AuditLogRepository _auditLog;
+
+  // Best-effort — see AuditLogEntry's doc comment. Never lets a logging
+  // failure surface as an error for the real action that triggered it.
+  Future<void> _logAudit({required String action, required String summary, String? targetId}) async {
+    final user = _auth.currentUser;
+    if (user == null) return;
+    try {
+      await _auditLog.logAction(
+        AuditLogEntry(
+          id: _auditLog.newLogId(),
+          actorId: user.uid,
+          actorEmail: user.email ?? '',
+          action: action,
+          summary: summary,
+          targetId: targetId,
+          createdAt: DateTime.now(),
+        ),
+      );
+    } catch (_) {
+      // Swallowed deliberately — see the doc comment above.
+    }
+  }
 
   final Rx<UserProfile?> currentProfile = Rx<UserProfile?>(null);
   final RxBool isLoading = false.obs;
 
   String? get currentUserId => _auth.currentUser?.uid;
+  bool get isAdmin => currentProfile.value?.isAdmin ?? false;
+  bool get isSeller => currentProfile.value?.isSeller ?? false;
+  bool get canManageProducts => currentProfile.value?.canManageProducts ?? false;
 
   @override
   void onInit() {
@@ -99,6 +68,7 @@ class UserProfileController extends GetxController {
     required String email,
     String? phone,
     String? photoUrl,
+    UserRole role = UserRole.user,
   }) async {
     try {
       isLoading.value = true;
@@ -109,20 +79,14 @@ class UserProfileController extends GetxController {
         email: email,
         phone: phone,
         photoUrl: photoUrl,
+        role: role,
         createdAt: DateTime.now(),
       );
 
-      await _firestore.collection('users').doc(uid).set(profile.toMap());
+      await _repository.createProfile(profile);
 
       currentProfile.value = profile;
       isLoading.value = false;
-
-      Get.snackbar(
-        'Success!',
-        'Profile created successfully',
-        backgroundColor: Colors.green,
-        colorText: Colors.white,
-      );
 
       return null;
     } catch (e) {
@@ -137,13 +101,11 @@ class UserProfileController extends GetxController {
       if (currentUserId == null) return;
 
       isLoading.value = true;
+      final profile = await _repository.fetchProfile(currentUserId!);
 
-      final doc = await _firestore.collection('users').doc(currentUserId).get();
-
-      if (doc.exists) {
-        currentProfile.value = UserProfile.fromFirestore(doc);
+      if (profile != null) {
+        currentProfile.value = profile;
       } else {
-        // Create profile if it doesn't exist
         final user = _auth.currentUser;
         if (user != null) {
           await createUserProfile(
@@ -158,26 +120,12 @@ class UserProfileController extends GetxController {
       isLoading.value = false;
     } catch (e) {
       isLoading.value = false;
-      Get.snackbar(
-        'Error',
-        'Failed to fetch profile: $e',
-        backgroundColor: Colors.red,
-        colorText: Colors.white,
-      );
     }
   }
 
-  // Stream user profile for real-time updates
   Stream<UserProfile?> getUserProfileStream() {
-    if (currentUserId == null) {
-      return Stream.value(null);
-    }
-
-    return _firestore
-        .collection('users')
-        .doc(currentUserId)
-        .snapshots()
-        .map((doc) => doc.exists ? UserProfile.fromFirestore(doc) : null);
+    if (currentUserId == null) return Stream.value(null);
+    return _repository.watchProfile(currentUserId!);
   }
 
   // ==================== UPDATE ====================
@@ -194,44 +142,26 @@ class UserProfileController extends GetxController {
 
       isLoading.value = true;
 
-      final updateData = <String, dynamic>{
-        'updatedAt': FieldValue.serverTimestamp(),
-      };
+      final updateData = <String, dynamic>{};
 
       if (fullName != null) {
         updateData['fullName'] = fullName.trim();
-        // Also update Firebase Auth display name
         await _auth.currentUser?.updateDisplayName(fullName.trim());
       }
-
       if (email != null) {
         updateData['email'] = email.trim();
-        // Note: Updating email in Firebase Auth requires re-authentication
-        // For security, we only update it in Firestore here
-        // To update Firebase Auth email, use: verifyBeforeUpdateEmail() after re-authentication
       }
-
       if (phone != null) {
         updateData['phone'] = phone.trim();
       }
-
       if (photoUrl != null) {
         updateData['photoUrl'] = photoUrl;
       }
 
-      await _firestore.collection('users').doc(currentUserId).update(updateData);
-
-      // Reload current profile
+      await _repository.updateProfile(currentUserId!, updateData);
       await fetchUserProfile();
 
       isLoading.value = false;
-
-      Get.snackbar(
-        'Success!',
-        'Profile updated successfully',
-        backgroundColor: Colors.green,
-        colorText: Colors.white,
-      );
 
       return null;
     } catch (e) {
@@ -240,24 +170,34 @@ class UserProfileController extends GetxController {
     }
   }
 
-  // Update profile photo
   Future<String?> updateProfilePhoto(String photoUrl) async {
     try {
       if (currentUserId == null) {
         return 'User not logged in';
       }
 
-      await _firestore.collection('users').doc(currentUserId).update({
-        'photoUrl': photoUrl,
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
-
+      await _repository.updateProfile(currentUserId!, {'photoUrl': photoUrl});
       await _auth.currentUser?.updatePhotoURL(photoUrl);
       await fetchUserProfile();
 
       return null;
     } catch (e) {
       return 'Failed to update photo: $e';
+    }
+  }
+
+  /// Admin-only: changes another user's role (e.g. approving them as a
+  /// seller). Firestore rules independently require the caller to already
+  /// be an admin to write `role` on any profile but their own — this method
+  /// doesn't check that itself, it just fails at the database if the caller
+  /// isn't actually one.
+  Future<String?> setUserRole(String uid, UserRole role) async {
+    try {
+      await _repository.updateProfile(uid, {'role': role.name});
+      await _logAudit(action: 'user.role_changed', summary: 'Role changed to ${role.name}.', targetId: uid);
+      return null;
+    } catch (e) {
+      return 'Failed to update role: $e';
     }
   }
 
@@ -269,18 +209,10 @@ class UserProfileController extends GetxController {
       }
 
       isLoading.value = true;
-
-      await _firestore.collection('users').doc(currentUserId).delete();
+      await _repository.deleteProfile(currentUserId!);
 
       currentProfile.value = null;
       isLoading.value = false;
-
-      Get.snackbar(
-        'Deleted',
-        'Profile deleted successfully',
-        backgroundColor: Colors.green,
-        colorText: Colors.white,
-      );
 
       return null;
     } catch (e) {
@@ -289,4 +221,3 @@ class UserProfileController extends GetxController {
     }
   }
 }
-

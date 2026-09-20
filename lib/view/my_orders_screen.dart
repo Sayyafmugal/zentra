@@ -2,16 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:intl/intl.dart';
 import '../Controllers/order_controller.dart';
-import 'order_details_screen.dart';
+import '../routes/app_routes.dart';
+import '../widgets/state_views.dart';
 
 class MyOrdersScreen extends StatelessWidget {
   const MyOrdersScreen({super.key});
 
-  static const Color primaryColor = Color(0xFFFF5200);
-
-  String _formatDate(DateTime date) {
-    return DateFormat('MMM dd, yyyy').format(date);
-  }
+  String _formatDate(DateTime date) => DateFormat('MMM dd, yyyy').format(date);
 
   String _formatPrice(double price) => '\$${price.toStringAsFixed(2)}';
 
@@ -19,73 +16,64 @@ class MyOrdersScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final orderController = OrderController.instance;
 
-    // Fetch orders on first load
     if (orderController.orders.isEmpty && !orderController.isLoading.value) {
       orderController.fetchOrders();
     }
 
     return Scaffold(
-      backgroundColor: Colors.white,
       appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.black),
-          onPressed: () => Get.back(),
-        ),
-        title: const Text(
-          'My Orders',
-          style: TextStyle(
-            color: Colors.black,
-            fontSize: 20,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
+        leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => Get.back()),
+        title: const Text('My Orders'),
         centerTitle: false,
       ),
       body: Obx(() {
         if (orderController.isLoading.value && orderController.orders.isEmpty) {
-          return const Center(child: CircularProgressIndicator());
+          return const LoadingView(asGrid: false);
         }
 
         if (orderController.orders.isEmpty) {
-          return Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.shopping_bag_outlined, size: 80, color: Colors.grey[400]),
-                const SizedBox(height: 16),
-                Text(
-                  'No orders yet',
-                  style: TextStyle(fontSize: 18, color: Colors.grey[600]),
-                ),
-              ],
-            ),
+          return const EmptyStateView(
+            icon: Icons.shopping_bag_outlined,
+            title: 'No orders yet',
+            message: 'Your placed orders will show up here.',
           );
         }
 
-        return ListView.separated(
-          padding: const EdgeInsets.all(16),
-          itemCount: orderController.orders.length,
-          separatorBuilder: (_, __) => const SizedBox(height: 16),
-          itemBuilder: (context, index) {
-            final order = orderController.orders[index];
-            return _buildOrderCard(order);
-          },
+        return RefreshIndicator(
+          onRefresh: orderController.fetchOrders,
+          child: ListView.separated(
+            padding: const EdgeInsets.all(16),
+            itemCount: orderController.orders.length,
+            separatorBuilder: (_, __) => const SizedBox(height: 16),
+            itemBuilder: (context, index) {
+              final order = orderController.orders[index];
+              return _OrderCard(order: order, formatDate: _formatDate, formatPrice: _formatPrice);
+            },
+          ),
         );
       }),
     );
   }
+}
 
-  Widget _buildOrderCard(Order order) {
+class _OrderCard extends StatelessWidget {
+  const _OrderCard({required this.order, required this.formatDate, required this.formatPrice});
+
+  final Order order;
+  final String Function(DateTime) formatDate;
+  final String Function(double) formatPrice;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: theme.cardColor,
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
+            color: Colors.black.withValues(alpha: 0.05),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
@@ -98,17 +86,13 @@ class MyOrdersScreen extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                'Order #${order.id.substring(0, 8)}',
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.black,
-                ),
+                'Order #${order.id.substring(0, order.id.length >= 8 ? 8 : order.id.length)}',
+                style: theme.textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.bold),
               ),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
-                  color: order.statusColor.withOpacity(0.1),
+                  color: order.statusColor.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Text(
@@ -124,19 +108,13 @@ class MyOrdersScreen extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Text(
-            _formatDate(order.createdAt),
-            style: const TextStyle(
-              fontSize: 14,
-              color: Colors.grey,
-            ),
+            formatDate(order.createdAt),
+            style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
           ),
           const SizedBox(height: 12),
           Text(
             'Items: ${order.items.map((item) => item.productName).join(', ')}',
-            style: const TextStyle(
-              fontSize: 14,
-              color: Colors.black87,
-            ),
+            style: theme.textTheme.bodyMedium,
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
           ),
@@ -145,21 +123,15 @@ class MyOrdersScreen extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                'Total: ${_formatPrice(order.totalAmount)}',
-                style: const TextStyle(
-                  fontSize: 16,
+                'Total: ${formatPrice(order.totalAmount)}',
+                style: theme.textTheme.bodyLarge?.copyWith(
                   fontWeight: FontWeight.bold,
-                  color: primaryColor,
+                  color: theme.colorScheme.primary,
                 ),
               ),
               TextButton(
-                onPressed: () {
-                  Get.to(() => OrderDetailsScreen(order: order));
-                },
-                child: const Text(
-                  'View Details',
-                  style: TextStyle(color: primaryColor),
-                ),
+                onPressed: () => Get.toNamed(AppRoutes.orderDetails, arguments: order),
+                child: const Text('View Details'),
               ),
             ],
           ),

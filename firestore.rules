@@ -1,0 +1,306 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function myProfile() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isAdmin() {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        myProfile().role == 'admin';
+    }
+
+    function isSeller() {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        myProfile().role == 'seller';
+    }
+
+    // True only while `sellers/{uid}` exists and is active — an approved
+    // seller who is later suspended immediately loses write access, even
+    // if their `users/{uid}.role` field hasn't been rolled back yet.
+    function isActiveSeller(sellerId) {
+      return isSignedIn() && request.auth.uid == sellerId &&
+        exists(/databases/$(database)/documents/sellers/$(sellerId)) &&
+        get(/databases/$(database)/documents/sellers/$(sellerId)).data.status == 'active';
+    }
+
+    // Mirrors lib/models/order.dart's kValidOrderStatusTransitions exactly —
+    // keep the two in sync if either changes. Enforced here so a modified
+    // client can't bypass OrderController's transition check with a raw
+    // Firestore write.
+    function isValidOrderTransition(fromStatus, toStatus) {
+      return
+        (fromStatus == 'pendingPayment' && toStatus in ['paid', 'cancelled']) ||
+        (fromStatus == 'paid' && toStatus in ['processing', 'cancelled', 'refunded']) ||
+        (fromStatus == 'processing' && toStatus in ['packed', 'cancelled']) ||
+        (fromStatus == 'packed' && toStatus == 'shipped') ||
+        (fromStatus == 'shipped' && toStatus in ['outForDelivery', 'delivered']) ||
+        (fromStatus == 'outForDelivery' && toStatus == 'delivered') ||
+        (fromStatus == 'delivered' && toStatus == 'returnRequested') ||
+        (fromStatus == 'returnRequested' && toStatus == 'returned') ||
+        (fromStatus == 'returned' && toStatus == 'refunded');
+    }
+
+    // Mirrors lib/models/order.dart's kSellerAllowedOrderTransitions — the
+    // fulfillment-only subset of the full transition graph. No payment,
+    // cancellation, or refund/return states here on purpose: those stay
+    // admin-only regardless of who's fulfilling the order.
+    function isValidSellerOrderTransition(fromStatus, toStatus) {
+      return
+        (fromStatus == 'processing' && toStatus == 'packed') ||
+        (fromStatus == 'packed' && toStatus == 'shipped') ||
+        (fromStatus == 'shipped' && toStatus in ['outForDelivery', 'delivered']) ||
+        (fromStatus == 'outForDelivery' && toStatus == 'delivered');
+    }
+
+    // Public product catalog: anyone can read (including signed-out users
+    // browsing the storefront). Admins can write anything; a seller may only
+    // create/edit/delete their own listings, and may never write themselves
+    // straight to `published` or `rejected` — those are admin-only
+    // approval-workflow transitions (see PRODUCT-STATUS in the app's model
+    // docs). A seller also can never reassign a product to another seller.
+    match /products/{productId} {
+      allow read: if true;
+
+      allow create: if isAdmin() ||
+        (isActiveSeller(request.resource.data.sellerId) &&
+          request.resource.data.status in ['draft', 'pendingApproval']);
+
+      allow update: if isAdmin() ||
+        (isActiveSeller(resource.data.sellerId) &&
+          request.resource.data.sellerId == resource.data.sellerId &&
+          request.resource.data.status != 'published' &&
+          request.resource.data.status != 'rejected') ||
+        // A review submission bumps the product's aggregate rating/count in
+        // the same client transaction that creates the review document (see
+        // ReviewRepository.submitReview). Rules evaluate each document
+        // write independently though, so this can't literally require "a
+        // review was also just created" — only bound the shape of the
+        // change: exactly these two fields, count moving up by exactly one,
+        // rating in range. A sufficiently malicious client could still spam
+        // this without a real review behind it; closing that gap for good
+        // needs a Cloud Function trigger, which (like Storage) requires
+        // Blaze billing this project deliberately doesn't assume. Flagged
+        // here rather than pretended away.
+        (isSignedIn() &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['rating', 'reviewCount']) &&
+          request.resource.data.reviewCount == resource.data.reviewCount + 1 &&
+          request.resource.data.rating >= 0 && request.resource.data.rating <= 5);
+
+      allow delete: if isAdmin() || isActiveSeller(resource.data.sellerId);
+    }
+
+    // Discount codes. `coupons/{code}` uses the normalized code itself as the
+    // id (see Coupon.normalize) so a checkout can look one up directly. Read
+    // is public because the checkout screen needs to preview a code's
+    // discount before the order is placed; the actual redemption (does this
+    // user get to use it, has it hit its limit) is re-checked authoritatively
+    // inside OrderRepository.createOrderFromCart's transaction, not trusted
+    // from this preview. `usedCount` may only ever move up by exactly one per
+    // write, which is the same "bound the shape, not the cause" limitation as
+    // the product rating bump above — a real guarantee that an increment
+    // corresponds to a real order would need a Cloud Function trigger.
+    match /coupons/{code} {
+      allow read: if true;
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin() ||
+        (isSignedIn() &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['usedCount']) &&
+          request.resource.data.usedCount == resource.data.usedCount + 1);
+
+      // One redemption record per user per coupon — its existence is what
+      // makes "have I already used this code" a plain get() inside the
+      // checkout transaction rather than a query.
+      match /redemptions/{userId} {
+        allow read: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+        allow create: if isSignedIn() && request.auth.uid == userId &&
+          request.resource.data.userId == userId;
+        allow update, delete: if false;
+      }
+    }
+
+    // The real, admin-managed category list (replaces what used to be a
+    // hardcoded constant in the app) — publicly readable so the storefront
+    // and add-product picker can both use it, admin-only to change.
+    match /categories/{categoryId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Best-effort admin action log (see AuditLogEntry's doc comment for the
+    // honest limitation: without a Cloud Function, this can't be a provably
+    // tamper-proof audit trail — it's the same "bound the shape, not the
+    // cause" ceiling as the coupon/review aggregate updates above). Only an
+    // admin can read the log or write an entry attributed to themselves;
+    // entries are permanent once written — no client ever edits or deletes
+    // its own history.
+    match /auditLogs/{logId} {
+      allow read: if isAdmin();
+      allow create: if isAdmin() && request.resource.data.actorId == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    // A customer's review of a product from one specific delivered order.
+    // `reviews/{orderId}_{productId}` is a deterministic id (see
+    // Review.idFor) — that's what makes "one review per purchased item"
+    // enforceable by a plain existence check (`resource == null` on create)
+    // rather than a query, which rules can't run. The purchase-eligibility
+    // check reads the referenced order directly: it must belong to the
+    // reviewer, be delivered, and actually contain this product (via the
+    // denormalized `productIds` array — see Order.toMap).
+    match /reviews/{reviewId} {
+      allow read: if true;
+
+      allow create: if isSignedIn() &&
+        request.resource.data.userId == request.auth.uid &&
+        request.resource.data.rating >= 1 && request.resource.data.rating <= 5 &&
+        reviewId == (request.resource.data.orderId + '_' + request.resource.data.productId) &&
+        get(/databases/$(database)/documents/orders/$(request.resource.data.orderId)).data.userId
+          == request.auth.uid &&
+        get(/databases/$(database)/documents/orders/$(request.resource.data.orderId)).data.status
+          == 'delivered' &&
+        request.resource.data.productId in
+          get(/databases/$(database)/documents/orders/$(request.resource.data.orderId)).data.productIds;
+
+      // No client-side editing (see the model's docs) — only admin
+      // moderation (hiding a review) or removing it outright.
+      allow update, delete: if isAdmin();
+    }
+
+    // A seller's approved public profile. Only ever created/updated by an
+    // admin (via approving a `sellerApplications` doc) — there is no
+    // client path for a user to write their own `sellers/{uid}` document,
+    // which is what makes seller status trustworthy elsewhere in these
+    // rules (see isActiveSeller above).
+    match /sellers/{sellerId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // A user's request to become a seller. They can create their own
+    // application and read it (an existing seller can't submit another —
+    // no reason to re-apply), but only an admin can change its status —
+    // approving/rejecting is exactly the action that's also responsible for
+    // creating the `sellers/{uid}` doc and updating `users/{uid}.role`, so
+    // keeping that admin-only here is what prevents self-approval.
+    // NOTE: "at most one PENDING application per user" is enforced at the
+    // app layer (SellerApplicationRepository.getPendingApplicationForUser),
+    // not by these rules — a client bypassing the app could create more
+    // than one, which only wastes an admin's review queue, not a security
+    // hole (approval still requires isAdmin()).
+    match /sellerApplications/{applicationId} {
+      allow read: if isSignedIn() &&
+        (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isSignedIn() && !isSeller() &&
+        request.resource.data.userId == request.auth.uid &&
+        request.resource.data.status == 'pending';
+      allow update: if isAdmin();
+      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid &&
+        resource.data.status == 'pending';
+    }
+
+    // Per-user collections: a user may only read/write their own documents.
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isOwner(userId);
+      // Only admins may change `role` on an existing profile — this is the
+      // rule that makes it impossible for a client to self-grant `seller`
+      // or `admin` by editing their own profile document.
+      allow update: if isOwner(userId) &&
+        (!('role' in request.resource.data) ||
+          request.resource.data.role == resource.data.role) || isAdmin();
+      allow delete: if isOwner(userId);
+    }
+
+    match /cart/{cartItemId} {
+      allow read, delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    match /wishlist/{itemId} {
+      allow read, delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    match /addresses/{addressId} {
+      allow read, delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    match /paymentMethods/{paymentId} {
+      allow read, delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    // Orders: a customer can create their own order (must start at
+    // pendingPayment) and read their own order history; an admin can read
+    // and update any order following the valid transition graph. A customer
+    // may only ever self-cancel from pendingPayment — every other status
+    // change is admin/fulfillment-only, and a customer can never touch any
+    // field besides `status`/`updatedAt` once the order exists (no editing
+    // items, totals, or payment info after placement).
+    //
+    // A seller can read any order that contains at least one of their items
+    // (`sellerIds` is a denormalized array on the order doc precisely so
+    // this query/rule can work without a separate sellerOrders collection —
+    // see Order.toMap). They may advance fulfillment status themselves only
+    // when the order is theirs ALONE (`sellerIds` has exactly one entry,
+    // equal to their uid) — a multi-seller order's status stays admin-only,
+    // since one seller marking the whole order "shipped" would misrepresent
+    // another seller's still-unshipped items.
+    match /orders/{orderId} {
+      allow read: if isSignedIn() && (
+        resource.data.userId == request.auth.uid ||
+        isAdmin() ||
+        request.auth.uid in resource.data.sellerIds
+      );
+
+      allow create: if isSignedIn() &&
+        request.resource.data.userId == request.auth.uid &&
+        request.resource.data.status == 'pendingPayment' &&
+        request.resource.data.totalAmount is number &&
+        // >= 0 rather than > 0: a coupon can legitimately discount an order
+        // to free (see Coupon.discountFor's cap at the subtotal).
+        request.resource.data.totalAmount >= 0;
+
+      allow update: if isSignedIn() && (
+        (isAdmin() &&
+          isValidOrderTransition(resource.data.status, request.resource.data.status))
+        ||
+        (resource.data.userId == request.auth.uid &&
+          resource.data.status == 'pendingPayment' &&
+          request.resource.data.status == 'cancelled' &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt']))
+        ||
+        (isActiveSeller(request.auth.uid) &&
+          resource.data.sellerIds.size() == 1 &&
+          request.auth.uid in resource.data.sellerIds &&
+          isValidSellerOrderTransition(resource.data.status, request.resource.data.status) &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt']))
+      );
+
+      // Orders are a transaction record — a customer can cancel one (via
+      // the update rule above) but never delete it outright, even their
+      // own, once it's been created. Only admin can remove an order doc
+      // (e.g. for a data-deletion request), and even then that's a rare,
+      // deliberate action rather than something the app UI exposes.
+      allow delete: if isAdmin();
+    }
+  }
+}

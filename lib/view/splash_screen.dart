@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:zentra_0/Controllers/auth_controller.dart';
-import 'package:zentra_0/view/onboarding_screen.dart';
+import 'package:zentra_0/routes/app_routes.dart';
 
 class SplashScreen extends StatelessWidget {
   SplashScreen({super.key});
@@ -12,12 +13,10 @@ class SplashScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     // Navigate after 2.5 seconds
     Future.delayed(const Duration(milliseconds: 2500), () {
-      if (authController.isFirstTime) {
-        Get.off(() => const OnboardingScreen());
-      } else if (authController.isLoggedIn) {
-        Get.off(() => const OnboardingScreen());
+      if (authController.isLoggedIn) {
+        Get.offNamed(AppRoutes.main);
       } else {
-        Get.off(() => const OnboardingScreen());
+        Get.offNamed(AppRoutes.onboarding);
       }
     });
 
@@ -38,10 +37,7 @@ class SplashScreen extends StatelessWidget {
           children: [
             // Subtle grid background pattern
             Positioned.fill(
-              child: Opacity(
-                opacity: 0.05,
-                child: GridPattern(color: Colors.white),
-              ),
+              child: Opacity(opacity: 0.05, child: GridPattern(color: Colors.white)),
             ),
 
             // Center content
@@ -99,12 +95,11 @@ class SplashScreen extends StatelessWidget {
                       children: [
                         Text(
                           "ZENTRA",
-                          style: TextStyle(
+                          style: GoogleFonts.montserrat(
                             color: Colors.white,
                             fontSize: 40,
                             fontWeight: FontWeight.bold,
                             letterSpacing: 6,
-                            fontFamily: 'Montserrat',
                           ),
                         ),
                         const SizedBox(height: 4),
@@ -156,16 +151,11 @@ class SplashScreen extends StatelessWidget {
 
 class GridPattern extends StatelessWidget {
   final Color color;
-  const GridPattern({
-    Key? key,
-    required this.color,
-  }) : super(key: key);
+  const GridPattern({Key? key, required this.color}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
-    return CustomPaint(
-      painter: GridPainter(color: color),
-    );
+    return CustomPaint(painter: GridPainter(color: color));
   }
 }
 

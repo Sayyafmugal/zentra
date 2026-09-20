@@ -5,11 +5,10 @@ import '../Controllers/address_controller.dart';
 class ShippingAddressScreen extends StatelessWidget {
   const ShippingAddressScreen({super.key});
 
-  static const Color primaryColor = Color(0xFFFF5200);
-
   @override
   Widget build(BuildContext context) {
     final addressController = AddressController.instance;
+    final primaryColor = Theme.of(context).colorScheme.primary;
 
     // Fetch addresses on first load
     if (addressController.addresses.isEmpty && !addressController.isLoading.value) {
@@ -17,16 +16,7 @@ class ShippingAddressScreen extends StatelessWidget {
     }
 
     return Scaffold(
-      backgroundColor: Colors.grey[50],
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0,
-        title: const Text(
-          "Shipping Addresses",
-          style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
-        ),
-        iconTheme: const IconThemeData(color: Colors.black),
-      ),
+      appBar: AppBar(title: const Text("Shipping Addresses")),
       body: Obx(() {
         if (addressController.isLoading.value && addressController.addresses.isEmpty) {
           return const Center(child: CircularProgressIndicator());
@@ -39,10 +29,7 @@ class ShippingAddressScreen extends StatelessWidget {
               children: [
                 Icon(Icons.location_on_outlined, size: 80, color: Colors.grey[400]),
                 const SizedBox(height: 16),
-                Text(
-                  'No addresses yet',
-                  style: TextStyle(fontSize: 18, color: Colors.grey[600]),
-                ),
+                Text('No addresses yet', style: TextStyle(fontSize: 18, color: Colors.grey[600])),
                 const SizedBox(height: 24),
                 ElevatedButton.icon(
                   icon: const Icon(Icons.add, color: Colors.white),
@@ -86,10 +73,7 @@ class ShippingAddressScreen extends StatelessWidget {
                         ),
                         title: Row(
                           children: [
-                            Text(
-                              address.name,
-                              style: const TextStyle(fontWeight: FontWeight.bold),
-                            ),
+                            Text(address.name, style: const TextStyle(fontWeight: FontWeight.bold)),
                             if (address.isDefault) ...[
                               const SizedBox(width: 8),
                               Container(
@@ -237,7 +221,9 @@ class ShippingAddressScreen extends StatelessWidget {
                   child: const Text("Cancel"),
                 ),
                 ElevatedButton(
-                  style: ElevatedButton.styleFrom(backgroundColor: primaryColor),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Theme.of(context).colorScheme.primary,
+                  ),
                   onPressed: () async {
                     if (nameCtrl.text.isNotEmpty &&
                         fullNameCtrl.text.isNotEmpty &&
@@ -278,8 +264,7 @@ class ShippingAddressScreen extends StatelessWidget {
     );
   }
 
-  void _showEditAddressDialog(
-      BuildContext context, AddressController controller, Address address) {
+  void _showEditAddressDialog(BuildContext context, AddressController controller, Address address) {
     final nameCtrl = TextEditingController(text: address.name);
     final fullNameCtrl = TextEditingController(text: address.fullName);
     final addressCtrl = TextEditingController(text: address.address);
@@ -352,7 +337,9 @@ class ShippingAddressScreen extends StatelessWidget {
                   child: const Text("Cancel"),
                 ),
                 ElevatedButton(
-                  style: ElevatedButton.styleFrom(backgroundColor: primaryColor),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Theme.of(context).colorScheme.primary,
+                  ),
                   onPressed: () async {
                     final error = await controller.updateAddress(
                       addressId: address.id,
@@ -389,17 +376,17 @@ class ShippingAddressScreen extends StatelessWidget {
   }
 
   void _showDeleteConfirmDialog(
-      BuildContext context, AddressController controller, String addressId) {
+    BuildContext context,
+    AddressController controller,
+    String addressId,
+  ) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text("Delete Address"),
         content: const Text("Are you sure you want to delete this address?"),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text("Cancel"),
-          ),
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
             onPressed: () async {

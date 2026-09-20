@@ -5,11 +5,10 @@ import '../Controllers/payment_method_controller.dart';
 class PaymentMethodScreen extends StatelessWidget {
   const PaymentMethodScreen({super.key});
 
-  static const Color primaryColor = Color(0xFFFF5200);
-
   @override
   Widget build(BuildContext context) {
     final paymentController = PaymentMethodController.instance;
+    final primaryColor = Theme.of(context).colorScheme.primary;
 
     // Fetch payment methods on first load
     if (paymentController.paymentMethods.isEmpty && !paymentController.isLoading.value) {
@@ -17,140 +16,154 @@ class PaymentMethodScreen extends StatelessWidget {
     }
 
     return Scaffold(
-      backgroundColor: Colors.grey[50],
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0,
-        title: const Text(
-          "Payment Methods",
-          style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
-        ),
-        iconTheme: const IconThemeData(color: Colors.black),
-      ),
-      body: Obx(() {
-        if (paymentController.isLoading.value && paymentController.paymentMethods.isEmpty) {
-          return const Center(child: CircularProgressIndicator());
-        }
-
-        if (paymentController.paymentMethods.isEmpty) {
-          return Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
+      appBar: AppBar(title: const Text("Payment Methods")),
+      body: Column(
+        children: [
+          Container(
+            width: double.infinity,
+            margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.amber.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Row(
               children: [
-                Icon(Icons.credit_card_outlined, size: 80, color: Colors.grey[400]),
-                const SizedBox(height: 16),
-                Text(
-                  'No payment methods yet',
-                  style: TextStyle(fontSize: 18, color: Colors.grey[600]),
-                ),
-                const SizedBox(height: 24),
-                ElevatedButton.icon(
-                  icon: const Icon(Icons.add, color: Colors.white),
-                  label: const Text(
-                    "Add Your First Payment Method",
-                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                const Icon(Icons.info_outline, color: Colors.amber, size: 18),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Demo only — no real payment provider is configured. Cards saved here '
+                    'never process a real charge; use Cash on Delivery for a real order.',
+                    style: Theme.of(context).textTheme.bodySmall,
                   ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: primaryColor,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                  ),
-                  onPressed: () => _showAddPaymentDialog(context, paymentController),
                 ),
               ],
             ),
-          );
-        }
+          ),
+          Expanded(child: _buildBody(context, paymentController, primaryColor)),
+        ],
+      ),
+    );
+  }
 
-        return Padding(
-          padding: const EdgeInsets.all(16.0),
+  Widget _buildBody(
+    BuildContext context,
+    PaymentMethodController paymentController,
+    Color primaryColor,
+  ) {
+    return Obx(() {
+      if (paymentController.isLoading.value && paymentController.paymentMethods.isEmpty) {
+        return const Center(child: CircularProgressIndicator());
+      }
+
+      if (paymentController.paymentMethods.isEmpty) {
+        return Center(
           child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Expanded(
-                child: ListView.builder(
-                  itemCount: paymentController.paymentMethods.length,
-                  itemBuilder: (context, index) {
-                    final method = paymentController.paymentMethods[index];
-                    return Card(
-                      margin: const EdgeInsets.only(bottom: 12),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        side: method.isDefault
-                            ? BorderSide(color: primaryColor, width: 2)
-                            : BorderSide.none,
-                      ),
-                      child: ListTile(
-                        leading: const Icon(Icons.credit_card, color: Colors.blue),
-                        title: Row(
-                          children: [
-                            Text(
-                              "${method.displayName} (${method.maskedCardNumber})",
-                              style: const TextStyle(fontWeight: FontWeight.bold),
-                            ),
-                            if (method.isDefault) ...[
-                              const SizedBox(width: 8),
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                decoration: BoxDecoration(
-                                  color: primaryColor,
-                                  borderRadius: BorderRadius.circular(4),
-                                ),
-                                child: const Text(
-                                  'DEFAULT',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ],
-                        ),
-                        subtitle: Text("Expires ${method.expiryDate}"),
-                        trailing: PopupMenuButton<String>(
-                          onSelected: (value) {
-                            if (value == 'edit') {
-                              _showEditPaymentDialog(context, paymentController, method);
-                            } else if (value == 'delete') {
-                              _showDeleteConfirmDialog(context, paymentController, method.id);
-                            } else if (value == 'default' && !method.isDefault) {
-                              paymentController.setAsDefault(method.id);
-                            }
-                          },
-                          itemBuilder: (context) => [
-                            const PopupMenuItem(value: 'edit', child: Text("Edit")),
-                            if (!method.isDefault)
-                              const PopupMenuItem(value: 'default', child: Text("Set as Default")),
-                            const PopupMenuItem(value: 'delete', child: Text("Delete")),
-                          ],
-                        ),
-                      ),
-                    );
-                  },
-                ),
-              ),
-              SizedBox(
-                width: double.infinity,
-                height: 50,
-                child: ElevatedButton.icon(
-                  icon: const Icon(Icons.add, color: Colors.white),
-                  label: const Text(
-                    "Add New Payment Method",
-                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-                  ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: primaryColor,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  ),
-                  onPressed: () => _showAddPaymentDialog(context, paymentController),
-                ),
+              Icon(Icons.credit_card_outlined, size: 80, color: Theme.of(context).hintColor),
+              const SizedBox(height: 16),
+              Text('No payment methods yet', style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: 24),
+              ElevatedButton.icon(
+                icon: const Icon(Icons.add),
+                label: const Text("Add Your First Payment Method"),
+                onPressed: () => _showAddPaymentDialog(context, paymentController),
               ),
             ],
           ),
         );
-      }),
-    );
+      }
+
+      return Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          children: [
+            Expanded(
+              child: ListView.builder(
+                itemCount: paymentController.paymentMethods.length,
+                itemBuilder: (context, index) {
+                  final method = paymentController.paymentMethods[index];
+                  return Card(
+                    margin: const EdgeInsets.only(bottom: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      side: method.isDefault
+                          ? BorderSide(color: primaryColor, width: 2)
+                          : BorderSide.none,
+                    ),
+                    child: ListTile(
+                      leading: const Icon(Icons.credit_card, color: Colors.blue),
+                      title: Row(
+                        children: [
+                          Text(
+                            "${method.displayName} (${method.maskedCardNumber})",
+                            style: const TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                          if (method.isDefault) ...[
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: primaryColor,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: const Text(
+                                'DEFAULT',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                      subtitle: Text("Expires ${method.expiryDate}"),
+                      trailing: PopupMenuButton<String>(
+                        onSelected: (value) {
+                          if (value == 'edit') {
+                            _showEditPaymentDialog(context, paymentController, method);
+                          } else if (value == 'delete') {
+                            _showDeleteConfirmDialog(context, paymentController, method.id);
+                          } else if (value == 'default' && !method.isDefault) {
+                            paymentController.setAsDefault(method.id);
+                          }
+                        },
+                        itemBuilder: (context) => [
+                          const PopupMenuItem(value: 'edit', child: Text("Edit")),
+                          if (!method.isDefault)
+                            const PopupMenuItem(value: 'default', child: Text("Set as Default")),
+                          const PopupMenuItem(value: 'delete', child: Text("Delete")),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+            SizedBox(
+              width: double.infinity,
+              height: 50,
+              child: ElevatedButton.icon(
+                icon: const Icon(Icons.add, color: Colors.white),
+                label: const Text(
+                  "Add New Payment Method",
+                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: primaryColor,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                onPressed: () => _showAddPaymentDialog(context, paymentController),
+              ),
+            ),
+          ],
+        ),
+      );
+    });
   }
 
   void _showAddPaymentDialog(BuildContext context, PaymentMethodController controller) {
@@ -238,7 +251,9 @@ class PaymentMethodScreen extends StatelessWidget {
                   child: const Text("Cancel"),
                 ),
                 ElevatedButton(
-                  style: ElevatedButton.styleFrom(backgroundColor: primaryColor),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Theme.of(context).colorScheme.primary,
+                  ),
                   onPressed: () async {
                     if (cardNumberCtrl.text.isNotEmpty && expiryDateCtrl.text.isNotEmpty) {
                       final error = await controller.addPaymentMethod(
@@ -271,7 +286,10 @@ class PaymentMethodScreen extends StatelessWidget {
   }
 
   void _showEditPaymentDialog(
-      BuildContext context, PaymentMethodController controller, PaymentMethod method) {
+    BuildContext context,
+    PaymentMethodController controller,
+    PaymentMethod method,
+  ) {
     PaymentType selectedType = method.type;
     final expiryDateCtrl = TextEditingController(text: method.expiryDate);
     final cardholderNameCtrl = TextEditingController(text: method.cardholderName ?? '');
@@ -353,7 +371,9 @@ class PaymentMethodScreen extends StatelessWidget {
                   child: const Text("Cancel"),
                 ),
                 ElevatedButton(
-                  style: ElevatedButton.styleFrom(backgroundColor: primaryColor),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Theme.of(context).colorScheme.primary,
+                  ),
                   onPressed: () async {
                     final error = await controller.updatePaymentMethod(
                       paymentId: method.id,
@@ -383,17 +403,17 @@ class PaymentMethodScreen extends StatelessWidget {
   }
 
   void _showDeleteConfirmDialog(
-      BuildContext context, PaymentMethodController controller, String paymentId) {
+    BuildContext context,
+    PaymentMethodController controller,
+    String paymentId,
+  ) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text("Delete Payment Method"),
         content: const Text("Are you sure you want to delete this payment method?"),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text("Cancel"),
-          ),
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
             onPressed: () async {

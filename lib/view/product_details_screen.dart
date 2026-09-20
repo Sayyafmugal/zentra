@@ -1,10 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'product_model.dart'; // Import Product model
+import 'package:share_plus/share_plus.dart';
+import '../models/product.dart';
+import '../models/product_variant.dart';
 import '../Controllers/cart_controller.dart';
+import '../Controllers/review_controller.dart';
 import '../Controllers/wishlist_controller.dart';
-import 'my_cart_screen.dart'; // Your Cart Screen
-import 'checkout_screen.dart'; // Your Checkout Screen
+import '../routes/app_routes.dart';
+import '../widgets/rating_stars.dart';
+import '../widgets/product_image.dart';
 
 class ProductDetailsScreen extends StatefulWidget {
   final Product product;
@@ -16,61 +20,112 @@ class ProductDetailsScreen extends StatefulWidget {
 }
 
 class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
-  static const Color primaryColor = Color(0xFFFF5200);
   String? _selectedSize;
+
+  bool get _hasVariants => widget.product.hasVariants;
+
+  List<String> get _sizeOptions => _hasVariants
+      ? widget.product.variants.map((v) => v.size).toList()
+      : widget.product.availableSizes;
+
+  ProductVariant? get _selectedVariant {
+    if (!_hasVariants || _selectedSize == null) return null;
+    for (final v in widget.product.variants) {
+      if (v.size == _selectedSize) return v;
+    }
+    return null;
+  }
+
+  /// Stock for the current selection: the variant's stock when the product
+  /// has variants, the product's untracked/total stock otherwise. Null
+  /// means "not tracked" — always orderable, matching every pre-upgrade
+  /// product that has no stock field at all.
+  int? get _availableStock => _hasVariants ? _selectedVariant?.stock : widget.product.totalStock;
+
+  bool get _selectionInStock => _availableStock == null || _availableStock! > 0;
+
+  double get _effectivePrice =>
+      _selectedVariant?.effectivePrice(widget.product.currentPrice) ?? widget.product.currentPrice;
 
   @override
   void initState() {
     super.initState();
-    // Set default size
-    if (widget.product.availableSizes.isNotEmpty) {
-      _selectedSize = widget.product.availableSizes[0];
+    ReviewController.instance.fetchReviewsForProduct(widget.product.id);
+    if (_sizeOptions.isNotEmpty) {
+      // Prefer the first size that's actually in stock, so a product with a
+      // mix of in-stock and sold-out sizes doesn't default to a dead end.
+      _selectedSize = _sizeOptions.firstWhere((size) {
+        if (!_hasVariants) return true;
+        final variant = widget.product.variants.firstWhere((v) => v.size == size);
+        return variant.stock > 0;
+      }, orElse: () => _sizeOptions.first);
     }
   }
 
   String _formatPrice(double price) => '\$${price.toStringAsFixed(2)}';
 
+  Future<void> _addToCart() async {
+    if (_selectedSize == null) {
+      return;
+    }
+    if (!_selectionInStock) {
+      return;
+    }
+
+    await CartController.instance.addToCart(
+      product: widget.product,
+      selectedSize: _selectedSize!,
+      quantity: 1,
+    );
+  }
+
+  void _buyNow() {
+    if (_selectedSize == null) {
+      return;
+    }
+    if (!_selectionInStock) {
+      return;
+    }
+    Get.toNamed(AppRoutes.checkout, arguments: {'totalAmount': _effectivePrice, 'itemCount': 1});
+  }
+
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return Scaffold(
       extendBodyBehindAppBar: true,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios, color: Colors.black),
-          onPressed: () => Navigator.pop(context),
-        ),
+        leading: IconButton(icon: const Icon(Icons.arrow_back_ios), onPressed: () => Get.back()),
         actions: [
           IconButton(
-            icon: const Icon(Icons.share_outlined, color: Colors.black),
-            onPressed: () {
-              print('Share pressed for ${widget.product.name}');
-            },
+            icon: const Icon(Icons.share_outlined),
+            tooltip: 'Share',
+            onPressed: () => SharePlus.instance.share(
+              ShareParams(
+                text:
+                    'Check out ${widget.product.name} on Zentra — ${_formatPrice(widget.product.currentPrice)}',
+              ),
+            ),
           ),
         ],
       ),
       body: Stack(
         children: [
-          // --- Product Image Section ---
           Positioned(
             top: 0,
             left: 0,
             right: 0,
             height: MediaQuery.of(context).size.height * 0.45,
             child: Container(
-              color: Colors.grey[200],
+              color: theme.colorScheme.surfaceContainerHighest,
               child: Stack(
                 alignment: Alignment.center,
                 children: [
-                  Image.asset(
-                    widget.product.imagePath,
-                    fit: BoxFit.cover,
-                    errorBuilder: (context, error, stackTrace) => Container(
-                      color: Colors.grey[300],
-                      alignment: Alignment.center,
-                      child: const Icon(Icons.image_outlined, size: 80, color: Colors.grey),
-                    ),
+                  Hero(
+                    tag: 'product-image-${widget.product.id}',
+                    child: ProductImage(path: widget.product.imagePath, width: double.infinity),
                   ),
                   Positioned(
                     top: 10,
@@ -84,16 +139,13 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
                       child: Obx(() {
                         final wishlistController = WishlistController.instance;
                         final isInWishlist = wishlistController.isInWishlist(widget.product.id);
-                        
                         return IconButton(
                           icon: Icon(
                             isInWishlist ? Icons.favorite : Icons.favorite_border,
                             color: isInWishlist ? Colors.red : Colors.black,
                             size: 28,
                           ),
-                          onPressed: () {
-                            wishlistController.toggleWishlist(widget.product);
-                          },
+                          onPressed: () => wishlistController.toggleWishlist(widget.product),
                         );
                       }),
                     ),
@@ -102,14 +154,12 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
               ),
             ),
           ),
-
-          // --- Product Details Panel ---
           Positioned.fill(
             top: MediaQuery.of(context).size.height * 0.4,
             child: Container(
-              decoration: const BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.only(
+              decoration: BoxDecoration(
+                color: theme.scaffoldBackgroundColor,
+                borderRadius: const BorderRadius.only(
                   topLeft: Radius.circular(30.0),
                   topRight: Radius.circular(30.0),
                 ),
@@ -119,10 +169,15 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Product Name & Price
                     Text(
                       widget.product.name,
-                      style: const TextStyle(fontSize: 26, fontWeight: FontWeight.bold),
+                      style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 8),
+                    RatingStars(
+                      rating: widget.product.rating,
+                      size: 16,
+                      reviewCount: widget.product.reviewCount,
                     ),
                     const SizedBox(height: 8),
                     Row(
@@ -130,88 +185,148 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
                       children: [
                         Text(
                           'Category: ${widget.product.category}',
-                          style: const TextStyle(fontSize: 16, color: Colors.grey),
+                          style: theme.textTheme.bodyMedium?.copyWith(color: theme.hintColor),
                         ),
                         Text(
-                          _formatPrice(widget.product.currentPrice),
-                          style: const TextStyle(
-                            fontSize: 28,
+                          _formatPrice(_effectivePrice),
+                          style: theme.textTheme.headlineSmall?.copyWith(
                             fontWeight: FontWeight.bold,
-                            color: primaryColor,
+                            color: theme.colorScheme.primary,
                           ),
                         ),
                       ],
                     ),
                     const SizedBox(height: 30),
-
-                    // --- Size Selector ---
-                    const Text(
-                      'Select Size',
-                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                    ),
+                    Text('Select Size', style: theme.textTheme.titleMedium),
                     const SizedBox(height: 15),
-                    Row(
-                      children: widget.product.availableSizes.map((size) {
-                        bool isSelected = _selectedSize == size;
-                        return GestureDetector(
-                          onTap: () {
-                            setState(() => _selectedSize = size);
-                          },
-                          child: Container(
-                            width: 45,
-                            height: 45,
-                            margin: const EdgeInsets.only(right: 15),
-                            decoration: BoxDecoration(
-                              color: isSelected ? primaryColor : Colors.grey[200],
-                              borderRadius: BorderRadius.circular(10),
-                              border: Border.all(
-                                color: isSelected ? primaryColor : Colors.transparent,
-                                width: 2,
-                              ),
-                            ),
-                            alignment: Alignment.center,
-                            child: Text(
-                              size,
-                              style: TextStyle(
-                                color: isSelected ? Colors.white : Colors.black,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 16,
+                    Wrap(
+                      spacing: 15,
+                      runSpacing: 10,
+                      children: _sizeOptions.map((size) {
+                        final isSelected = _selectedSize == size;
+                        final variant = _hasVariants
+                            ? widget.product.variants.firstWhere((v) => v.size == size)
+                            : null;
+                        final outOfStock = variant != null && variant.stock <= 0;
+                        return Semantics(
+                          button: true,
+                          selected: isSelected,
+                          label: outOfStock ? 'Size $size, out of stock' : 'Size $size',
+                          child: GestureDetector(
+                            onTap: outOfStock ? null : () => setState(() => _selectedSize = size),
+                            child: Opacity(
+                              opacity: outOfStock ? 0.4 : 1.0,
+                              child: Container(
+                                width: 45,
+                                height: 45,
+                                decoration: BoxDecoration(
+                                  color: isSelected
+                                      ? theme.colorScheme.primary
+                                      : theme.colorScheme.surfaceContainerHighest,
+                                  borderRadius: BorderRadius.circular(10),
+                                  border: Border.all(
+                                    color: isSelected
+                                        ? theme.colorScheme.primary
+                                        : Colors.transparent,
+                                    width: 2,
+                                  ),
+                                ),
+                                alignment: Alignment.center,
+                                child: Text(
+                                  size,
+                                  style: TextStyle(
+                                    color: isSelected
+                                        ? Colors.white
+                                        : theme.textTheme.bodyLarge?.color,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 16,
+                                    decoration: outOfStock ? TextDecoration.lineThrough : null,
+                                  ),
+                                ),
                               ),
                             ),
                           ),
                         );
                       }).toList(),
                     ),
+                    if (_availableStock != null) ...[
+                      const SizedBox(height: 10),
+                      Text(
+                        _availableStock! > 0
+                            ? (_availableStock! <= 5
+                                  ? 'Only $_availableStock left in stock'
+                                  : 'In stock')
+                            : 'Out of stock',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: _availableStock! > 0 ? Colors.green : theme.colorScheme.error,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 30),
-
-                    // --- Description Section ---
-                    const Text(
-                      'Description',
-                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                    ),
+                    Text('Description', style: theme.textTheme.titleMedium),
                     const SizedBox(height: 10),
                     Text(
                       widget.product.description,
-                      style: const TextStyle(fontSize: 15, height: 1.5, color: Colors.black87),
+                      style: theme.textTheme.bodyMedium?.copyWith(height: 1.5),
                     ),
-
                     const SizedBox(height: 20),
-                    const Text(
-                      'Shipping & Returns',
-                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                    ),
+                    Text('Shipping & Returns', style: theme.textTheme.titleMedium),
                     const SizedBox(height: 10),
-                    const Text(
+                    Text(
                       'Free shipping on orders over \$100. Easy 30-day returns accepted.',
-                      style: TextStyle(fontSize: 15, height: 1.5, color: Colors.black87),
+                      style: theme.textTheme.bodyMedium?.copyWith(height: 1.5),
                     ),
+                    const SizedBox(height: 20),
+                    Text('Reviews', style: theme.textTheme.titleMedium),
+                    const SizedBox(height: 10),
+                    Obx(() {
+                      final reviews = ReviewController.instance.productReviews;
+                      if (reviews.isEmpty) {
+                        return Text(
+                          'No reviews yet — be the first after your order is delivered.',
+                          style: theme.textTheme.bodyMedium?.copyWith(color: theme.hintColor),
+                        );
+                      }
+                      return Column(
+                        children: reviews
+                            .map(
+                              (review) => Container(
+                                margin: const EdgeInsets.only(bottom: 10),
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: theme.colorScheme.surfaceContainerHighest,
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Text(
+                                          review.userName,
+                                          style: theme.textTheme.bodyMedium?.copyWith(
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        RatingStars(rating: review.rating, size: 14),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 6),
+                                    Text(review.comment, style: theme.textTheme.bodyMedium),
+                                  ],
+                                ),
+                              ),
+                            )
+                            .toList(),
+                      );
+                    }),
                   ],
                 ),
               ),
             ),
           ),
-
-          // --- Bottom Buttons ---
           Positioned(
             left: 0,
             right: 0,
@@ -219,10 +334,10 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 15),
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: theme.scaffoldBackgroundColor,
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withOpacity(0.1),
+                    color: Colors.black.withValues(alpha: 0.1),
                     blurRadius: 10,
                     offset: const Offset(0, -5),
                   ),
@@ -230,102 +345,23 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
               ),
               child: Row(
                 children: [
-                  // Add to Cart Button
                   Expanded(
                     child: SizedBox(
                       height: 55,
                       child: OutlinedButton.icon(
-                        onPressed: () async {
-                          if (_selectedSize != null) {
-                            final cartController = CartController.instance;
-                            final error = await cartController.addToCart(
-                              product: widget.product,
-                              selectedSize: _selectedSize!,
-                              quantity: 1,
-                            );
-
-                            if (error == null) {
-                              // Show success message and optionally navigate to cart
-                              Get.snackbar(
-                                'Added to Cart',
-                                '${widget.product.name} added to cart',
-                                backgroundColor: Colors.green,
-                                colorText: Colors.white,
-                                duration: const Duration(seconds: 2),
-                              );
-                              
-                              // Optionally navigate to cart after a short delay
-                              // Uncomment the lines below if you want to auto-navigate
-                              // Future.delayed(const Duration(milliseconds: 500), () {
-                              //   Navigator.push(
-                              //     context,
-                              //     MaterialPageRoute(builder: (context) => const MyCartScreen()),
-                              //   );
-                              // });
-                            } else {
-                              Get.snackbar(
-                                'Error',
-                                error,
-                                backgroundColor: Colors.red,
-                                colorText: Colors.white,
-                              );
-                            }
-                          } else {
-                            Get.snackbar(
-                              'Select Size',
-                              'Please select a size first',
-                              backgroundColor: Colors.orange,
-                              colorText: Colors.white,
-                            );
-                          }
-                        },
-                        icon: const Icon(Icons.shopping_bag_outlined, color: primaryColor),
-                        label: const Text(
-                          'Add To Cart',
-                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: primaryColor),
-                        ),
-                        style: OutlinedButton.styleFrom(
-                          side: const BorderSide(color: primaryColor, width: 2),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                        ),
+                        onPressed: _selectionInStock ? _addToCart : null,
+                        icon: const Icon(Icons.shopping_bag_outlined),
+                        label: const Text('Add To Cart'),
                       ),
                     ),
                   ),
                   const SizedBox(width: 15),
-
-                  // Buy Now Button
                   Expanded(
                     child: SizedBox(
                       height: 55,
                       child: ElevatedButton(
-                        onPressed: () {
-                          if (_selectedSize != null) {
-                            print('Buy Now: ${widget.product.name} (Size: $_selectedSize)');
-
-                            // ✅ Navigate to Checkout screen with product info
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) => CheckoutScreen(
-                                  totalAmount: widget.product.currentPrice,
-                                  itemCount: 1,
-                                ),
-                              ),
-                            );
-                          } else {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Please select a size first')),
-                            );
-                          }
-                        },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: primaryColor,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                        ),
-                        child: const Text(
-                          'Buy Now',
-                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
-                        ),
+                        onPressed: _selectionInStock ? _buyNow : null,
+                        child: Text(_selectionInStock ? 'Buy Now' : 'Out of Stock'),
                       ),
                     ),
                   ),

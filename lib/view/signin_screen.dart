@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'sign_up_screen.dart';
-import 'forgot_password_screen.dart';
-import 'main_screen.dart';
-import 'admin_dashboard_screen.dart';
+import 'package:get/get.dart';
+import '../Controllers/auth_controller.dart';
+import '../Controllers/user_profile_controller.dart';
+import '../routes/app_routes.dart';
+import '../widgets/app_text_field.dart';
 
 class SigninScreen extends StatefulWidget {
   const SigninScreen({super.key});
@@ -13,218 +13,208 @@ class SigninScreen extends StatefulWidget {
 }
 
 class _SigninScreenState extends State<SigninScreen> {
-  static const Color primaryColor = Color(0xFFFF5200);
-
-  final TextEditingController emailController = TextEditingController();
-  final TextEditingController passwordController = TextEditingController();
-
-  final FirebaseAuth _auth = FirebaseAuth.instance;
+  final _formKey = GlobalKey<FormState>();
+  final emailController = TextEditingController();
+  final passwordController = TextEditingController();
+  final AuthController _authController = Get.find<AuthController>();
 
   bool _isLoading = false;
+  bool _isAdminLoading = false;
+  String? _errorText;
 
-  // Sign In method
+  @override
+  void dispose() {
+    emailController.dispose();
+    passwordController.dispose();
+    super.dispose();
+  }
+
   Future<void> _signIn() async {
+    if (!_formKey.currentState!.validate()) return;
+
     setState(() {
       _isLoading = true;
+      _errorText = null;
     });
 
-    try {
-      final UserCredential userCredential =
-      await _auth.signInWithEmailAndPassword(
-        email: emailController.text.trim(),
-        password: passwordController.text.trim(),
-      );
-
-      // Sign-in successful, navigate to MainScreen
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (context) => const MainScreen()),
-      );
-    } on FirebaseAuthException catch (e) {
-      String message = 'An error occurred';
-      if (e.code == 'user-not-found') {
-        message = 'No user found for that email.';
-      } else if (e.code == 'wrong-password') {
-        message = 'Wrong password provided.';
-      }
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(message)),
-      );
-    } finally {
-      setState(() {
-        _isLoading = false;
-      });
-    }
-  }
-
-  // Admin / Seller sign in
-  Future<void> _signInAsAdmin() async {
-    setState(() {
-      _isLoading = true;
-    });
-
-    try {
-      await _auth.signInWithEmailAndPassword(
-        email: emailController.text.trim(),
-        password: passwordController.text.trim(),
-      );
-
-      // On success, go to admin dashboard
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (context) => const AdminDashboardScreen()),
-      );
-    } on FirebaseAuthException catch (e) {
-      String message = 'An error occurred';
-      if (e.code == 'user-not-found') {
-        message = 'No user found for that email.';
-      } else if (e.code == 'wrong-password') {
-        message = 'Wrong password provided.';
-      }
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(message)),
-      );
-    } finally {
-      setState(() {
-        _isLoading = false;
-      });
-    }
-  }
-
-  void _navigateTo(Widget screen) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (context) => screen),
+    final error = await _authController.loginUser(
+      email: emailController.text,
+      password: passwordController.text,
     );
+
+    if (!mounted) return;
+
+    // On success the AuthController's auth-state listener redirects to
+    // AppRoutes.main automatically — nothing to do here but surface errors.
+    setState(() {
+      _isLoading = false;
+      _errorText = error;
+    });
+  }
+
+  Future<void> _adminSignIn() async {
+    if (!_formKey.currentState!.validate()) return;
+
+    setState(() {
+      _isAdminLoading = true;
+      _errorText = null;
+    });
+
+    final error = await _authController.loginUser(
+      email: emailController.text,
+      password: passwordController.text,
+    );
+
+    if (error != null) {
+      if (!mounted) return;
+      setState(() {
+        _isAdminLoading = false;
+        _errorText = error;
+      });
+      return;
+    }
+
+    // AuthController's auth-state listener has already fired
+    // Get.offAllNamed(AppRoutes.main) by this point (it reacts as soon as
+    // Firebase's auth state updates), so this screen may already be
+    // disposed — the redirect below must not be gated on `mounted`.
+    final profileController = Get.find<UserProfileController>();
+    await profileController.fetchUserProfile();
+
+    if (!profileController.isAdmin) {
+      await _authController.logout();
+      if (mounted) {
+        setState(() {
+          _isAdminLoading = false;
+          _errorText = 'This account does not have admin access.';
+        });
+      }
+      return;
+    }
+
+    Get.offAllNamed(AppRoutes.adminDashboard);
+  }
+
+  String? _validateEmail(String? value) {
+    final email = value?.trim() ?? '';
+    if (email.isEmpty) return 'Email is required';
+    if (!GetUtils.isEmail(email)) return 'Enter a valid email address';
+    return null;
+  }
+
+  String? _validatePassword(String? value) {
+    if (value == null || value.isEmpty) return 'Password is required';
+    if (value.length < 6) return 'Password must be at least 6 characters';
+    return null;
   }
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return Scaffold(
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 48),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Welcome Back!',
-                style: TextStyle(
-                    fontSize: 28, fontWeight: FontWeight.bold, color: Colors.black),
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                'Sign in to continue shopping',
-                style: TextStyle(fontSize: 16, color: Colors.grey),
-              ),
-              const SizedBox(height: 48),
-
-              // Email
-              TextField(
-                controller: emailController,
-                decoration: InputDecoration(
-                  labelText: 'Email',
-                  prefixIcon: const Icon(Icons.mail_outline, color: primaryColor),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                  filled: true,
-                  fillColor: Colors.grey[100],
+          child: Form(
+            key: _formKey,
+            autovalidateMode: AutovalidateMode.onUserInteraction,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Welcome Back!',
+                  style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
                 ),
-              ),
-              const SizedBox(height: 16),
-
-              // Password
-              TextField(
-                controller: passwordController,
-                obscureText: true,
-                decoration: InputDecoration(
-                  labelText: 'Password',
-                  prefixIcon: const Icon(Icons.lock_outline, color: primaryColor),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                  filled: true,
-                  fillColor: Colors.grey[100],
+                const SizedBox(height: 8),
+                Text(
+                  'Sign in to continue shopping',
+                  style: theme.textTheme.bodyLarge?.copyWith(color: theme.hintColor),
                 ),
-              ),
-              const SizedBox(height: 12),
+                const SizedBox(height: 48),
 
-              Align(
-                alignment: Alignment.centerRight,
-                child: TextButton(
-                  onPressed: () {
-                    _navigateTo(const ForgotPasswordScreen());
-                  },
-                  child: const Text(
-                    'Forgot Password?',
-                    style: TextStyle(color: primaryColor),
+                AppTextField(
+                  key: const Key('signin_email_field'),
+                  controller: emailController,
+                  label: 'Email',
+                  prefixIcon: Icons.mail_outline,
+                  keyboardType: TextInputType.emailAddress,
+                  validator: _validateEmail,
+                ),
+                const SizedBox(height: 16),
+
+                AppTextField(
+                  key: const Key('signin_password_field'),
+                  controller: passwordController,
+                  label: 'Password',
+                  prefixIcon: Icons.lock_outline,
+                  obscureText: true,
+                  validator: _validatePassword,
+                ),
+                const SizedBox(height: 12),
+
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton(
+                    onPressed: () => Get.toNamed(AppRoutes.forgotPassword),
+                    child: const Text('Forgot Password?'),
                   ),
                 ),
-              ),
-              const SizedBox(height: 24),
+                const SizedBox(height: 24),
 
-              // Sign In Button
-              SizedBox(
-                width: double.infinity,
-                height: 56,
-                child: ElevatedButton(
-                  onPressed: _isLoading ? null : _signIn,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: primaryColor,
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12)),
+                if (_errorText != null) ...[
+                  Text(
+                    _errorText!,
+                    style: TextStyle(color: theme.colorScheme.error),
                   ),
-                  child: _isLoading
-                      ? const CircularProgressIndicator(color: Colors.white)
-                      : const Text(
-                    'Sign In',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white,)
-
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
-
-              // Admin / Seller Login Button
-              SizedBox(
-                width: double.infinity,
-                height: 48,
-                child: OutlinedButton(
-                  onPressed: _isLoading ? null : _signInAsAdmin,
-                  style: OutlinedButton.styleFrom(
-                    side: const BorderSide(color: primaryColor, width: 1.6),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                  child: const Text(
-                    'Login as Seller / Admin',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                      color: primaryColor,
-                    ),
-                  ),
-                ),
-              ),
-
-              const SizedBox(height: 32),
-
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Text("Don't have an account?", style: TextStyle(fontSize: 16, color: Colors.black54)),
-                  TextButton(
-                    onPressed: () {
-                      _navigateTo(const SignupScreen());
-                    },
-                    child: const Text(
-                      'Sign Up',
-                      style: TextStyle(color: primaryColor, fontWeight: FontWeight.bold),
-                    ),
-                  ),
+                  const SizedBox(height: 16),
                 ],
-              )
-            ],
+
+                SizedBox(
+                  width: double.infinity,
+                  height: 56,
+                  child: ElevatedButton(
+                    onPressed: (_isLoading || _isAdminLoading) ? null : _signIn,
+                    child: _isLoading
+                        ? const SizedBox(
+                            height: 24,
+                            width: 24,
+                            child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5),
+                          )
+                        : const Text('Sign In'),
+                  ),
+                ),
+                const SizedBox(height: 16),
+
+                SizedBox(
+                  width: double.infinity,
+                  height: 56,
+                  child: OutlinedButton.icon(
+                    key: const Key('admin_login_button'),
+                    onPressed: (_isLoading || _isAdminLoading) ? null : _adminSignIn,
+                    icon: _isAdminLoading
+                        ? const SizedBox(
+                            height: 20,
+                            width: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2.5),
+                          )
+                        : const Icon(Icons.admin_panel_settings_outlined),
+                    label: const Text('Login as Admin'),
+                  ),
+                ),
+                const SizedBox(height: 32),
+
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text("Don't have an account?", style: theme.textTheme.bodyLarge),
+                    TextButton(
+                      onPressed: () => Get.toNamed(AppRoutes.signup),
+                      child: const Text('Sign Up', style: TextStyle(fontWeight: FontWeight.bold)),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
         ),
       ),
