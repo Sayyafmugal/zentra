@@ -2,29 +2,26 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import '../Controllers/wishlist_controller.dart';
 import '../Controllers/cart_controller.dart';
+import '../Controllers/main_tab_controller.dart';
+import '../Utils/app_colors.dart';
 import '../models/product.dart';
 import '../widgets/state_views.dart';
 import '../widgets/product_image.dart';
+import '../widgets/app_toast.dart';
 
+/// Saved-items list, matching the mockup's Wishlist tab: a count badge,
+/// a card per item with Move-to-Cart / Remove actions, and an empty state
+/// with a heart icon and an "Explore Products" CTA into Shopping.
 class WishlistTab extends StatelessWidget {
-  const WishlistTab({super.key, this.initialProduct});
-
-  final Product? initialProduct;
+  const WishlistTab({super.key});
 
   String _formatPrice(double price) => '\$${price.toStringAsFixed(2)}';
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final bool shouldShowAppBar = ModalRoute.of(context)?.canPop ?? false;
     final wishlistController = WishlistController.instance;
     final cartController = CartController.instance;
-
-    if (initialProduct != null && !wishlistController.isInWishlist(initialProduct!.id)) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        wishlistController.addToWishlist(initialProduct!);
-      });
-    }
 
     if (wishlistController.wishlistItems.isEmpty && !wishlistController.isLoading.value) {
       wishlistController.fetchWishlistItems();
@@ -32,178 +29,163 @@ class WishlistTab extends StatelessWidget {
 
     return Obx(() {
       final items = wishlistController.wishlistItems;
-      final bool hasItems = items.isNotEmpty;
+      final hasItems = items.isNotEmpty;
       final loading = wishlistController.isLoading.value;
 
-      return Scaffold(
-        appBar: shouldShowAppBar ? AppBar(title: const Text('My Wishlist')) : null,
-        body: SafeArea(
-          child: loading && items.isEmpty
-              ? const LoadingView(asGrid: false)
-              : !hasItems
-              ? EmptyStateView(
-                  icon: Icons.favorite_border,
-                  title: 'Your Wishlist is Empty',
-                  message: 'Tap the heart icon on any product to save it here for later!',
-                  ctaLabel: shouldShowAppBar ? 'Continue Shopping' : null,
-                  onCta: shouldShowAppBar ? () => Get.back() : null,
-                )
-              : RefreshIndicator(
-                  onRefresh: wishlistController.fetchWishlistItems,
-                  child: Column(
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-                        child: Row(
+      return SafeArea(
+        child: loading && items.isEmpty
+            ? const LoadingView(asGrid: false)
+            : !hasItems
+            ? EmptyStateView(
+                icon: Icons.favorite_border,
+                title: 'Wishlist is empty',
+                message: 'Tap the heart icon on any product to save it here.',
+                ctaLabel: 'Explore Products',
+                onCta: () => MainTabController.instance.goToShopping(),
+              )
+            : RefreshIndicator(
+                onRefresh: wishlistController.fetchWishlistItems,
+                child: ListView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.all(16),
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                              decoration: BoxDecoration(
-                                color: theme.colorScheme.primary.withValues(alpha: 0.12),
-                                borderRadius: BorderRadius.circular(12),
+                            Text(
+                              'SAVED ITEMS',
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: 0.6,
                               ),
-                              child: Row(
-                                children: [
-                                  Icon(Icons.favorite, color: theme.colorScheme.primary, size: 16),
-                                  const SizedBox(width: 6),
-                                  Text(
-                                    '${items.length} saved',
-                                    style: TextStyle(
-                                      color: theme.colorScheme.primary,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                ],
-                              ),
+                            ),
+                            Text(
+                              'Your personal wishlist collection',
+                              style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
                             ),
                           ],
                         ),
-                      ),
-                      Expanded(
-                        child: ListView.separated(
-                          physics: const AlwaysScrollableScrollPhysics(),
-                          padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-                          itemCount: items.length,
-                          separatorBuilder: (_, __) => const SizedBox(height: 12),
-                          itemBuilder: (context, index) {
-                            final product = items[index];
-                            return Card(
-                              clipBehavior: Clip.antiAlias,
-                              child: Padding(
-                                padding: const EdgeInsets.all(12.0),
-                                child: Row(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    ClipRRect(
-                                      borderRadius: BorderRadius.circular(12.0),
-                                      child: ProductImage(
-                                        path: product.imagePath,
-                                        width: 100,
-                                        height: 100,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 12),
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          Row(
-                                            crossAxisAlignment: CrossAxisAlignment.start,
-                                            children: [
-                                              Expanded(
-                                                child: Text(
-                                                  product.name,
-                                                  maxLines: 2,
-                                                  overflow: TextOverflow.ellipsis,
-                                                  style: theme.textTheme.bodyLarge?.copyWith(
-                                                    fontWeight: FontWeight.bold,
-                                                  ),
-                                                ),
-                                              ),
-                                              IconButton(
-                                                tooltip: 'Remove',
-                                                onPressed: () => wishlistController
-                                                    .removeFromWishlist(product.id),
-                                                icon: const Icon(Icons.close),
-                                              ),
-                                            ],
-                                          ),
-                                          const SizedBox(height: 4),
-                                          Text(
-                                            product.category,
-                                            style: theme.textTheme.bodySmall?.copyWith(
-                                              color: theme.hintColor,
-                                            ),
-                                          ),
-                                          const SizedBox(height: 8),
-                                          Row(
-                                            children: [
-                                              Text(
-                                                _formatPrice(product.currentPrice),
-                                                style: theme.textTheme.bodyLarge?.copyWith(
-                                                  fontWeight: FontWeight.bold,
-                                                  color: theme.colorScheme.primary,
-                                                ),
-                                              ),
-                                              if (product.oldPrice != null) ...[
-                                                const SizedBox(width: 8),
-                                                Text(
-                                                  _formatPrice(product.oldPrice!),
-                                                  style: theme.textTheme.bodySmall?.copyWith(
-                                                    color: theme.hintColor,
-                                                    decoration: TextDecoration.lineThrough,
-                                                  ),
-                                                ),
-                                              ],
-                                            ],
-                                          ),
-                                          const SizedBox(height: 12),
-                                          Row(
-                                            children: [
-                                              Expanded(
-                                                child: OutlinedButton.icon(
-                                                  onPressed: () => wishlistController
-                                                      .removeFromWishlist(product.id),
-                                                  icon: const Icon(Icons.delete_outline),
-                                                  label: const Text('Remove'),
-                                                ),
-                                              ),
-                                              const SizedBox(width: 12),
-                                              Expanded(
-                                                child: ElevatedButton.icon(
-                                                  onPressed: () {
-                                                    if (product.availableSizes.isNotEmpty) {
-                                                      cartController.addToCart(
-                                                        product: product,
-                                                        selectedSize: product.availableSizes.first,
-                                                        quantity: 1,
-                                                      );
-                                                      wishlistController.removeFromWishlist(
-                                                        product.id,
-                                                      );
-                                                    }
-                                                  },
-                                                  icon: const Icon(Icons.shopping_bag_outlined),
-                                                  label: const Text('Move to Cart'),
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                          decoration: BoxDecoration(
+                            color: theme.colorScheme.primary.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(color: theme.colorScheme.primary.withValues(alpha: 0.3)),
+                          ),
+                          child: Text(
+                            '${items.length} Items',
+                            style: TextStyle(
+                              color: theme.colorScheme.primary,
+                              fontWeight: FontWeight.w800,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const Divider(height: 24),
+                    ...items.map(
+                      (product) => Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: _WishlistRow(
+                          product: product,
+                          priceLabel: _formatPrice(product.currentPrice),
+                          onMoveToCart: () {
+                            cartController.addToCart(
+                              product: product,
+                              selectedSize: product.availableSizes.isNotEmpty
+                                  ? product.availableSizes.first
+                                  : 'One Size',
+                            );
+                            wishlistController.removeFromWishlist(product.id);
+                            AppToast.show('Moved "${product.name}" to cart');
+                          },
+                          onRemove: () {
+                            wishlistController.removeFromWishlist(product.id);
+                            AppToast.show(
+                              'Removed from wishlist',
+                              onUndo: () => wishlistController.addToWishlist(product),
                             );
                           },
                         ),
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
-        ),
+              ),
       );
     });
+  }
+}
+
+class _WishlistRow extends StatelessWidget {
+  const _WishlistRow({
+    required this.product,
+    required this.priceLabel,
+    required this.onMoveToCart,
+    required this.onRemove,
+  });
+
+  final Product product;
+  final String priceLabel;
+  final VoidCallback onMoveToCart;
+  final VoidCallback onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: theme.cardColor,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: theme.dividerColor),
+      ),
+      child: Row(
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: ProductImage(path: product.imagePath, width: 48, height: 48),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  product.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.bold),
+                ),
+                Text(
+                  priceLabel,
+                  style: TextStyle(
+                    color: theme.colorScheme.primary,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          TextButton(
+            onPressed: onMoveToCart,
+            style: TextButton.styleFrom(
+              backgroundColor: theme.colorScheme.primary.withValues(alpha: 0.1),
+              foregroundColor: theme.colorScheme.primary,
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+            ),
+            child: const Text('Move to Cart', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+          ),
+          IconButton(
+            onPressed: onRemove,
+            icon: const Icon(Icons.delete_outline, size: 18, color: AppColors.coral),
+          ),
+        ],
+      ),
+    );
   }
 }

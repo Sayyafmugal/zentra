@@ -48,33 +48,32 @@ class AppThemes {
     primaryColor: AppColors.primary,
     scaffoldBackgroundColor: AppColors.lightBackground,
     hintColor: AppColors.neutral500,
-    cardColor: AppColors.lightBackground,
+    cardColor: AppColors.lightCard,
     dividerColor: AppColors.lightBorder,
     colorScheme: ColorScheme.fromSeed(
       seedColor: AppColors.primary,
       primary: AppColors.primary,
       onPrimary: AppColors.onPrimary,
+      secondary: AppColors.coral,
       brightness: Brightness.light,
-      surface: AppColors.lightBackground,
+      surface: AppColors.lightCard,
       surfaceContainerHighest: AppColors.lightSurfaceVariant,
       error: AppColors.error,
     ),
     textTheme: _textTheme(AppColors.neutral700, AppColors.neutral900),
+    // The app's top header is always teal/white regardless of light/dark
+    // mode — a fixed brand color, not a surface that inverts with theme.
     appBarTheme: const AppBarTheme(
-      backgroundColor: AppColors.lightBackground,
-      foregroundColor: AppColors.neutral900,
+      backgroundColor: AppColors.teal,
+      foregroundColor: Colors.white,
       elevation: 0,
       centerTitle: false,
-      titleTextStyle: TextStyle(
-        color: AppColors.neutral900,
-        fontSize: 18,
-        fontWeight: FontWeight.w700,
-      ),
-      iconTheme: IconThemeData(color: AppColors.neutral900),
+      titleTextStyle: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w700),
+      iconTheme: IconThemeData(color: Colors.white),
     ),
     bottomNavigationBarTheme: const BottomNavigationBarThemeData(
-      backgroundColor: AppColors.lightBackground,
-      selectedItemColor: AppColors.primary,
+      backgroundColor: AppColors.lightCard,
+      selectedItemColor: AppColors.teal,
       unselectedItemColor: AppColors.neutral500,
       type: BottomNavigationBarType.fixed,
     ),
@@ -127,19 +126,19 @@ class AppThemes {
       labelStyle: const TextStyle(color: AppColors.neutral500),
     ),
     cardTheme: CardThemeData(
-      color: AppColors.lightBackground,
+      color: AppColors.lightCard,
       elevation: 0,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.card)),
     ),
     chipTheme: ChipThemeData(
       backgroundColor: AppColors.lightSurfaceVariant,
-      selectedColor: AppColors.primary,
+      selectedColor: AppColors.teal,
       labelStyle: const TextStyle(color: AppColors.neutral900),
       secondaryLabelStyle: const TextStyle(color: Colors.white),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.chip)),
     ),
     dialogTheme: DialogThemeData(
-      backgroundColor: AppColors.lightBackground,
+      backgroundColor: AppColors.lightCard,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
     ),
     snackBarTheme: SnackBarThemeData(
@@ -154,23 +153,27 @@ class AppThemes {
   static final dark = ThemeData(
     useMaterial3: true,
     brightness: Brightness.dark,
-    primaryColor: AppColors.primary,
+    primaryColor: AppColors.sage,
     scaffoldBackgroundColor: AppColors.darkBackground,
     hintColor: AppColors.neutral300,
-    cardColor: AppColors.darkSurface,
+    cardColor: AppColors.darkCard,
     dividerColor: AppColors.darkBorder,
+    // Dark mode swaps teal for sage as the accent color — the mockup's
+    // `dark:text-zentra-sage` pattern — since the deeper teal reads as
+    // low-contrast against a near-black background.
     colorScheme: ColorScheme.fromSeed(
-      seedColor: AppColors.primary,
-      primary: AppColors.primary,
-      onPrimary: AppColors.onPrimary,
+      seedColor: AppColors.sage,
+      primary: AppColors.sage,
+      onPrimary: Colors.white,
+      secondary: AppColors.coral,
       brightness: Brightness.dark,
-      surface: AppColors.darkBackground,
+      surface: AppColors.darkCard,
       surfaceContainerHighest: AppColors.darkSurfaceVariant,
       error: AppColors.error,
     ),
     textTheme: _textTheme(AppColors.neutral300, Colors.white),
     appBarTheme: const AppBarTheme(
-      backgroundColor: AppColors.darkBackground,
+      backgroundColor: AppColors.teal,
       foregroundColor: Colors.white,
       elevation: 0,
       centerTitle: false,
@@ -178,11 +181,14 @@ class AppThemes {
       iconTheme: IconThemeData(color: Colors.white),
     ),
     bottomNavigationBarTheme: const BottomNavigationBarThemeData(
-      backgroundColor: AppColors.darkSurface,
-      selectedItemColor: AppColors.primary,
+      backgroundColor: AppColors.darkCard,
+      selectedItemColor: AppColors.sage,
       unselectedItemColor: AppColors.neutral300,
       type: BottomNavigationBarType.fixed,
     ),
+    // "+ Add" / primary action buttons stay teal in both themes (the
+    // mockup never gives them a dark: variant) — only inline text accents
+    // (below) swap to sage.
     elevatedButtonTheme: ElevatedButtonThemeData(
       style: ElevatedButton.styleFrom(
         backgroundColor: AppColors.primary,
@@ -196,8 +202,8 @@ class AppThemes {
     ),
     outlinedButtonTheme: OutlinedButtonThemeData(
       style: OutlinedButton.styleFrom(
-        foregroundColor: AppColors.primary,
-        side: const BorderSide(color: AppColors.primary, width: 1.4),
+        foregroundColor: AppColors.sage,
+        side: const BorderSide(color: AppColors.sage, width: 1.4),
         minimumSize: const Size(88, 52),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         textStyle: AppTextStyles.buttonLarge,
@@ -205,7 +211,7 @@ class AppThemes {
     ),
     textButtonTheme: TextButtonThemeData(
       style: TextButton.styleFrom(
-        foregroundColor: AppColors.primary,
+        foregroundColor: AppColors.sage,
         textStyle: AppTextStyles.buttonMedium,
       ),
     ),
@@ -223,7 +229,7 @@ class AppThemes {
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(AppRadii.button + 4),
-        borderSide: const BorderSide(color: AppColors.primary, width: 1.6),
+        borderSide: const BorderSide(color: AppColors.sage, width: 1.6),
       ),
       errorBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(AppRadii.button + 4),
