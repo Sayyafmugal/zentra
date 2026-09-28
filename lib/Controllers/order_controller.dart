@@ -88,13 +88,63 @@ class OrderController extends GetxController {
     PaymentStatus paymentStatus = PaymentStatus.pending,
     String? couponCode,
   }) async {
-    if (currentUserId == null) {
-      return 'Please login to create an order';
-    }
-
     final cartController = CartController.instance;
     if (cartController.cartItems.isEmpty) {
       return 'Cart is empty';
+    }
+
+    return _placeOrder(
+      items: cartController.cartItems,
+      clearCartAfter: true,
+      shippingAddress: shippingAddress,
+      paymentMethod: paymentMethod,
+      paymentStatus: paymentStatus,
+      couponCode: couponCode,
+    );
+  }
+
+  /// "Buy Now": places an order for exactly [items] — typically a single
+  /// synthetic [CartItem] built from one product/variant/quantity selection
+  /// on the product details screen — through the same secure transactional
+  /// pipeline as a normal cart checkout (see
+  /// OrderRepository.createOrderFromCart: prices/stock/coupon are all
+  /// re-validated server-side regardless of which path was used). The
+  /// user's real cart is never read and never modified by this path.
+  Future<String?> createOrderFromItems({
+    required List<CartItem> items,
+    String? shippingAddress,
+    String? paymentMethod,
+    PaymentStatus paymentStatus = PaymentStatus.pending,
+    String? couponCode,
+  }) {
+    if (items.isEmpty) {
+      return Future.value('Nothing to order');
+    }
+
+    return _placeOrder(
+      items: items,
+      clearCartAfter: false,
+      shippingAddress: shippingAddress,
+      paymentMethod: paymentMethod,
+      paymentStatus: paymentStatus,
+      couponCode: couponCode,
+    );
+  }
+
+  /// Shared by [createOrderFromCart] and [createOrderFromItems] so both
+  /// paths go through identical validation/creation logic — the only
+  /// difference between "cart checkout" and "Buy Now" is which items list
+  /// is passed in and whether the real cart gets cleared afterward.
+  Future<String?> _placeOrder({
+    required List<CartItem> items,
+    required bool clearCartAfter,
+    String? shippingAddress,
+    String? paymentMethod,
+    PaymentStatus paymentStatus = PaymentStatus.pending,
+    String? couponCode,
+  }) async {
+    if (currentUserId == null) {
+      return 'Please login to create an order';
     }
 
     try {
@@ -103,7 +153,7 @@ class OrderController extends GetxController {
       final order = await _repository.createOrderFromCart(
         orderId: _repository.newOrderId(),
         userId: currentUserId!,
-        cartItems: cartController.cartItems,
+        cartItems: items,
         shippingAddress: shippingAddress,
         paymentMethod: paymentMethod,
         paymentStatus: paymentStatus,
@@ -113,7 +163,9 @@ class OrderController extends GetxController {
       orders.insert(0, order);
       isLoading.value = false;
 
-      await cartController.clearCart();
+      if (clearCartAfter) {
+        await CartController.instance.clearCart();
+      }
 
       return null;
     } on OrderValidationException catch (e) {

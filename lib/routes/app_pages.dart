@@ -1,6 +1,7 @@
 import 'package:get/get.dart';
 import '../models/product.dart';
 import '../models/order.dart';
+import '../models/cart_item.dart';
 import '../view/splash_screen.dart';
 import '../view/onboarding_screen.dart';
 import '../view/signin_screen.dart';
@@ -54,8 +55,8 @@ abstract class AppPages {
       page: () {
         final args = Get.arguments as Map<String, dynamic>;
         return CheckoutScreen(
-          totalAmount: args['totalAmount'] as double,
-          itemCount: args['itemCount'] as int,
+          items: (args['items'] as List).cast<CartItem>(),
+          isBuyNow: args['isBuyNow'] as bool? ?? false,
         );
       },
     ),

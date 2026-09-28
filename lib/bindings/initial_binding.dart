@@ -13,6 +13,7 @@ import '../Controllers/review_controller.dart';
 import '../Controllers/coupon_controller.dart';
 import '../Controllers/category_controller.dart';
 import '../Controllers/audit_log_controller.dart';
+import '../Controllers/main_tab_controller.dart';
 
 /// Puts every controller the app needs up front. The screens here are
 /// tightly interdependent (e.g. every tab of MainScreen needs cart,
@@ -37,5 +38,6 @@ class InitialBinding extends Bindings {
     Get.put(CouponController());
     Get.put(CategoryController());
     Get.put(AuditLogController());
+    Get.put(MainTabController());
   }
 }

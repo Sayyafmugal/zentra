@@ -17,7 +17,7 @@ class MyCartScreen extends StatelessWidget {
     }
     Get.toNamed(
       AppRoutes.checkout,
-      arguments: {'totalAmount': cartController.totalPrice, 'itemCount': cartController.totalItems},
+      arguments: {'items': cartController.cartItems, 'isBuyNow': false},
     );
   }
 

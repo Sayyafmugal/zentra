@@ -54,10 +54,20 @@ class ProductCard extends StatelessWidget {
                     tag: 'product-image-${product.id}',
                     child: AspectRatio(
                       aspectRatio: 1.5,
-                      child: ProductImage(path: product.imagePath),
+                      child: Opacity(
+                        opacity: product.isInStock ? 1.0 : 0.5,
+                        child: ProductImage(path: product.imagePath),
+                      ),
                     ),
                   ),
                 ),
+                if (!product.isInStock)
+                  const Positioned.fill(
+                    child: Align(
+                      alignment: Alignment.center,
+                      child: _OutOfStockBadge(),
+                    ),
+                  ),
                 if (product.discount != null)
                   Positioned(
                     top: 8,
@@ -159,6 +169,25 @@ class ProductCard extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _OutOfStockBadge extends StatelessWidget {
+  const _OutOfStockBadge();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.75),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: const Text(
+        'OUT OF STOCK',
+        style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
       ),
     );
   }

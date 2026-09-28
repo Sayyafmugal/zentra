@@ -86,7 +86,25 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
     if (!_selectionInStock) {
       return;
     }
-    Get.toNamed(AppRoutes.checkout, arguments: {'totalAmount': _effectivePrice, 'itemCount': 1});
+    final userId = CartController.instance.currentUserId;
+    if (userId == null) {
+      return;
+    }
+    // A local-only CartItem, never written to the `cart` collection — it
+    // exists purely to carry this single selection through the same
+    // checkout/order-creation pipeline the cart uses, without touching the
+    // user's real cart (see CheckoutScreen.isBuyNow / OrderController).
+    final buyNowItem = CartItem(
+      id: 'buy-now-${widget.product.id}-$_selectedSize',
+      product: widget.product,
+      quantity: 1,
+      selectedSize: _selectedSize!,
+      userId: userId,
+    );
+    Get.toNamed(
+      AppRoutes.checkout,
+      arguments: {'items': [buyNowItem], 'isBuyNow': true},
+    );
   }
 
   @override

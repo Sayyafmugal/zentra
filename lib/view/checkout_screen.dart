@@ -5,16 +5,27 @@ import '../Controllers/address_controller.dart';
 import '../Controllers/payment_method_controller.dart';
 import '../Controllers/coupon_controller.dart';
 import '../Utils/pricing_constants.dart';
+import '../models/cart_item.dart';
 import '../routes/app_routes.dart';
 import '../services/payment_service.dart';
+import '../widgets/state_views.dart';
 
 enum _PaymentChoice { cashOnDelivery, demoCard }
 
 class CheckoutScreen extends StatefulWidget {
-  final double totalAmount;
-  final int itemCount;
+  /// The items to place an order for. For a normal cart checkout this is
+  /// the user's live cart; for "Buy Now" it's exactly one synthetic item
+  /// built from a single product/variant/quantity selection — either way,
+  /// this list (never the live cart) is what actually gets ordered.
+  final List<CartItem> items;
 
-  const CheckoutScreen({super.key, required this.totalAmount, required this.itemCount});
+  /// True when reached via a product's "Buy Now" button rather than the
+  /// cart's "Checkout" button. Purely for display (title/labeling) and to
+  /// pick which OrderController method places the order — [items] is
+  /// always the source of truth for what's being purchased.
+  final bool isBuyNow;
+
+  const CheckoutScreen({super.key, required this.items, this.isBuyNow = false});
 
   @override
   State<CheckoutScreen> createState() => _CheckoutScreenState();
@@ -24,13 +35,14 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   bool _placingOrder = false;
   bool _checkingCoupon = false;
   String? _couponError;
+  String? _errorText;
   Coupon? _appliedCoupon;
   final _couponController = TextEditingController();
   // Cash on Delivery needs no saved card, so it's the sensible default — a
   // customer who's never added a card can still complete checkout.
   _PaymentChoice _paymentChoice = _PaymentChoice.cashOnDelivery;
 
-  double get _subtotal => widget.totalAmount;
+  double get _subtotal => widget.items.fold(0.0, (sum, item) => sum + item.totalPrice);
   double get _shipping => kFlatShippingFee;
   double get _tax => (_subtotal + _shipping) * kTaxRate;
   double get _discount => _appliedCoupon?.discountFor(_subtotal) ?? 0;
@@ -81,14 +93,20 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   };
 
   Future<void> _placeOrder({required String shippingAddress, String? cardLabel}) async {
-    setState(() => _placingOrder = true);
+    setState(() {
+      _placingOrder = true;
+      _errorText = null;
+    });
 
     final service = _serviceFor(_paymentChoice);
     final result = await service.charge(amount: _total);
 
     if (!result.success) {
       if (!mounted) return;
-      setState(() => _placingOrder = false);
+      setState(() {
+        _placingOrder = false;
+        _errorText = result.failureReason ?? 'Payment could not be completed. Please try again.';
+      });
       return;
     }
 
@@ -96,17 +114,27 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
         ? service.label
         : '${service.label}${cardLabel != null ? ' · $cardLabel' : ''}';
 
-    final error = await OrderController.instance.createOrderFromCart(
-      shippingAddress: shippingAddress,
-      paymentMethod: paymentMethod,
-      paymentStatus: result.resultingStatus,
-      couponCode: _appliedCoupon?.id,
-    );
+    final orderController = OrderController.instance;
+    final error = widget.isBuyNow
+        ? await orderController.createOrderFromItems(
+            items: widget.items,
+            shippingAddress: shippingAddress,
+            paymentMethod: paymentMethod,
+            paymentStatus: result.resultingStatus,
+            couponCode: _appliedCoupon?.id,
+          )
+        : await orderController.createOrderFromCart(
+            shippingAddress: shippingAddress,
+            paymentMethod: paymentMethod,
+            paymentStatus: result.resultingStatus,
+            couponCode: _appliedCoupon?.id,
+          );
 
     if (!mounted) return;
     setState(() => _placingOrder = false);
 
     if (error != null) {
+      setState(() => _errorText = error);
       return;
     }
 
@@ -122,9 +150,19 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     return Scaffold(
       appBar: AppBar(
         leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => Get.back()),
-        title: const Text('Checkout'),
+        title: Text(widget.isBuyNow ? 'Buy Now' : 'Checkout'),
       ),
-      body: Obx(() {
+      body: widget.items.isEmpty
+          ? EmptyStateView(
+              icon: Icons.shopping_bag_outlined,
+              title: 'Nothing to check out',
+              message: widget.isBuyNow
+                  ? 'This item is no longer available.'
+                  : 'Your cart is empty.',
+              ctaLabel: 'Continue shopping',
+              onCta: () => Get.back(),
+            )
+          : Obx(() {
         final defaultAddress = addressController.defaultAddress;
         final defaultPayment = paymentController.defaultPaymentMethod;
         final needsCard = _paymentChoice == _PaymentChoice.demoCard;
@@ -272,6 +310,41 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                       ),
                     const SizedBox(height: 24),
 
+                    Text(
+                      widget.isBuyNow ? 'Item' : 'Items (${widget.items.length})',
+                      style: theme.textTheme.titleMedium,
+                    ),
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: theme.colorScheme.surfaceContainerHighest,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Column(
+                        children: widget.items
+                            .map(
+                              (item) => Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 4),
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        '${item.product.name} · ${item.selectedSize} × ${item.quantity}',
+                                        style: theme.textTheme.bodyMedium,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                    Text(_formatPrice(item.totalPrice), style: theme.textTheme.bodyMedium),
+                                  ],
+                                ),
+                              ),
+                            )
+                            .toList(),
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+
                     Text('Order Summary', style: theme.textTheme.titleMedium),
                     const SizedBox(height: 8),
                     Container(
@@ -312,32 +385,45 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                 ],
               ),
               child: SafeArea(
-                child: SizedBox(
-                  width: double.infinity,
-                  height: 54,
-                  child: ElevatedButton(
-                    onPressed: !canPlaceOrder || _placingOrder
-                        ? null
-                        : () => _placeOrder(
-                            shippingAddress: defaultAddress.fullAddress,
-                            cardLabel: needsCard
-                                ? '${defaultPayment!.displayName} (${defaultPayment.maskedCardNumber})'
-                                : null,
-                          ),
-                    child: _placingOrder
-                        ? const SizedBox(
-                            height: 22,
-                            width: 22,
-                            child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5),
-                          )
-                        : Text(
-                            canPlaceOrder
-                                ? 'Place Order (${_formatPrice(_total)})'
-                                : defaultAddress == null
-                                ? 'Add a shipping address to continue'
-                                : 'Add a card to continue',
-                          ),
-                  ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (_errorText != null) ...[
+                      Text(
+                        _errorText!,
+                        style: TextStyle(color: theme.colorScheme.error),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 12),
+                    ],
+                    SizedBox(
+                      width: double.infinity,
+                      height: 54,
+                      child: ElevatedButton(
+                        onPressed: !canPlaceOrder || _placingOrder
+                            ? null
+                            : () => _placeOrder(
+                                shippingAddress: defaultAddress.fullAddress,
+                                cardLabel: needsCard
+                                    ? '${defaultPayment!.displayName} (${defaultPayment.maskedCardNumber})'
+                                    : null,
+                              ),
+                        child: _placingOrder
+                            ? const SizedBox(
+                                height: 22,
+                                width: 22,
+                                child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5),
+                              )
+                            : Text(
+                                canPlaceOrder
+                                    ? 'Place Order (${_formatPrice(_total)})'
+                                    : defaultAddress == null
+                                    ? 'Add a shipping address to continue'
+                                    : 'Add a card to continue',
+                              ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),

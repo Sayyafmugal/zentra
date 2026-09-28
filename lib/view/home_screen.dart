@@ -3,12 +3,19 @@ import 'package:get/get.dart';
 import '../Controllers/product_controller.dart';
 import '../Controllers/wishlist_controller.dart';
 import '../Controllers/category_controller.dart';
+import '../Controllers/main_tab_controller.dart';
 import '../routes/app_routes.dart';
 import '../Utils/responsive.dart';
 import '../widgets/product_card.dart';
 import '../widgets/state_views.dart';
 import '../widgets/section_header.dart';
 
+/// Home is the discovery/landing experience: a promo banner, category
+/// shortcuts, and a couple of curated product rails — every "View All" and
+/// category tap hands off to the Shopping tab (see MainTabController),
+/// which owns search/filtering/pagination over the full catalog. Home never
+/// re-implements that browsing logic itself; it only reads the same
+/// storefront feed ProductController already keeps loaded.
 class HomeTab extends StatefulWidget {
   const HomeTab({super.key});
 
@@ -20,10 +27,8 @@ class _HomeTabState extends State<HomeTab> {
   final ProductController _productController = ProductController.instance;
   final WishlistController _wishlistController = WishlistController.instance;
   final CategoryController _categoryController = CategoryController.instance;
-  final _searchController = TextEditingController();
 
-  String _selectedCategory = 'All';
-  String _query = '';
+  static const int _railLimit = 8;
 
   @override
   void initState() {
@@ -31,44 +36,23 @@ class _HomeTabState extends State<HomeTab> {
     _productController.fetchStorefrontFirstPage();
   }
 
-  @override
-  void dispose() {
-    _searchController.dispose();
-    super.dispose();
-  }
-
-  bool get _isFiltering => _selectedCategory != 'All' || _query.trim().isNotEmpty;
-
-  // Search/category filtering happens client-side over whatever's been
-  // paged in (see _filtered below), so it needs the whole catalog loaded to
-  // be correct — this pages in the rest on demand instead of doing that on
-  // every cold start, which is the thing storefront pagination exists to
-  // avoid. Cheap to call repeatedly: it's a no-op once everything's loaded.
-  void _ensureFullyLoadedIfFiltering() {
-    if (_isFiltering) _productController.ensureStorefrontFullyLoaded();
-  }
-
-  // Sourced from the real, admin-managed categories collection rather than
-  // scanned from whatever products happen to be paged in — the latter would
-  // silently hide a category until enough pages loaded to include one of
-  // its products (see ProductController's storefront pagination).
-  List<String> _buildCategories() {
-    return ['All', ..._categoryController.categoryNames];
-  }
-
-  List<Product> _filtered(List<Product> products) {
-    var list = _selectedCategory == 'All'
-        ? products
-        : products.where((p) => p.category == _selectedCategory).toList();
-    if (_query.trim().isNotEmpty) {
-      final q = _query.trim().toLowerCase();
-      list = list.where((p) => p.name.toLowerCase().contains(q)).toList();
-    }
-    return list;
-  }
-
   void _navigateToProductDetails(Product product) {
     Get.toNamed(AppRoutes.productDetails, arguments: product);
+  }
+
+  /// Newest-first — the storefront feed is already ordered by createdAt
+  /// descending (see ProductRepository.fetchProductsPage), so this is a
+  /// real "recently added" ordering, not an invented one.
+  List<Product> _newArrivals(List<Product> products) => products.take(_railLimit).toList();
+
+  /// Real user ratings only — a product with no reviews yet contributes no
+  /// signal here rather than being ranked by a meaningless default rating,
+  /// and the section itself is hidden below if nothing qualifies (see
+  /// Phase 15/"no fake analytics" in the demo-readiness brief this follows).
+  List<Product> _popular(List<Product> products) {
+    final rated = products.where((p) => p.reviewCount > 0).toList()
+      ..sort((a, b) => b.rating.compareTo(a.rating));
+    return rated.take(_railLimit).toList();
   }
 
   @override
@@ -78,10 +62,9 @@ class _HomeTabState extends State<HomeTab> {
       final products = _productController.publishedStorefrontProducts;
       final isLoading = _productController.isLoading.value;
       final error = _productController.errorMessage.value;
-      final categories = _buildCategories();
-      final filtered = _filtered(products);
-      final hasMore = _productController.hasMoreStorefront.value;
-      final isLoadingMore = _productController.isLoadingMoreStorefront.value;
+      final categories = _categoryController.categoryNames;
+      final newArrivals = _newArrivals(products);
+      final popular = _popular(products);
 
       return RefreshIndicator(
         onRefresh: _productController.fetchStorefrontFirstPage,
@@ -96,62 +79,7 @@ class _HomeTabState extends State<HomeTab> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Search bar
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _searchController,
-                        onChanged: (v) {
-                          setState(() => _query = v);
-                          _ensureFullyLoadedIfFiltering();
-                        },
-                        decoration: const InputDecoration(
-                          hintText: 'Search products',
-                          prefixIcon: Icon(Icons.search),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Container(
-                      width: 48,
-                      height: 48,
-                      decoration: BoxDecoration(
-                        color: theme.colorScheme.primary,
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: IconButton(
-                        icon: const Icon(Icons.tune, color: Colors.white),
-                        tooltip: 'Filter by category',
-                        onPressed: () => _showCategoryPicker(context, categories),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 24),
-
-                // Category chips
-                SizedBox(
-                  height: 40,
-                  child: ListView(
-                    scrollDirection: Axis.horizontal,
-                    children: categories
-                        .map(
-                          (cat) => _CategoryChip(
-                            label: cat,
-                            selected: _selectedCategory == cat,
-                            onTap: () {
-                              setState(() => _selectedCategory = cat);
-                              _ensureFullyLoadedIfFiltering();
-                            },
-                          ),
-                        )
-                        .toList(),
-                  ),
-                ),
-                const SizedBox(height: 24),
-
-                // Banner
+                // Hero / promo banner
                 Container(
                   padding: const EdgeInsets.all(16.0),
                   decoration: BoxDecoration(
@@ -177,7 +105,7 @@ class _HomeTabState extends State<HomeTab> {
                         ],
                       ),
                       ElevatedButton(
-                        onPressed: () => setState(() => _selectedCategory = 'All'),
+                        onPressed: () => MainTabController.instance.goToShopping(),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.white,
                           foregroundColor: theme.colorScheme.primary,
@@ -187,58 +115,64 @@ class _HomeTabState extends State<HomeTab> {
                     ],
                   ),
                 ),
-                const SizedBox(height: 24),
+                const SizedBox(height: 28),
 
-                SectionHeader(
-                  title: 'Products',
-                  actionLabel: _selectedCategory == 'All' ? null : 'See All',
-                  onAction: () => setState(() => _selectedCategory = 'All'),
-                ),
-                const SizedBox(height: 16),
+                if (categories.isNotEmpty) ...[
+                  SectionHeader(
+                    title: 'Categories',
+                    actionLabel: 'View All',
+                    onAction: () => MainTabController.instance.goToShopping(),
+                  ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    height: 96,
+                    child: ListView.separated(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: categories.length,
+                      separatorBuilder: (_, __) => const SizedBox(width: 12),
+                      itemBuilder: (context, index) {
+                        final category = categories[index];
+                        return _CategoryTile(
+                          label: category,
+                          onTap: () => MainTabController.instance.goToShopping(category: category),
+                        );
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 28),
+                ],
 
                 if (isLoading && products.isEmpty)
-                  const LoadingView()
+                  const LoadingView(asGrid: false, itemCount: 3)
                 else if (error.isNotEmpty && products.isEmpty)
                   ErrorStateView(
                     message: error,
                     onRetry: _productController.fetchStorefrontFirstPage,
                   )
-                else if (filtered.isEmpty)
+                else if (products.isEmpty)
                   const EmptyStateView(
-                    icon: Icons.search_off,
-                    title: 'No products found',
-                    message: 'Try a different search term or category.',
+                    icon: Icons.storefront_outlined,
+                    title: 'No products yet',
+                    message: 'Check back soon — new arrivals show up here first.',
                   )
                 else ...[
-                  GridView.builder(
-                    physics: const NeverScrollableScrollPhysics(),
-                    shrinkWrap: true,
-                    itemCount: filtered.length,
-                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: Responsive.gridColumns(context),
-                      crossAxisSpacing: 16,
-                      mainAxisSpacing: 16,
-                      childAspectRatio: 0.66,
-                    ),
-                    itemBuilder: (context, index) {
-                      final product = filtered[index];
-                      return ProductCard(
-                        product: product,
-                        onTap: () => _navigateToProductDetails(product),
-                        onToggleWishlist: () => _wishlistController.toggleWishlist(product),
-                        isWishlisted: _wishlistController.isInWishlist(product.id),
-                      );
-                    },
+                  _ProductRail(
+                    title: 'New Arrivals',
+                    products: newArrivals,
+                    onSeeAll: () => MainTabController.instance.goToShopping(),
+                    onProductTap: _navigateToProductDetails,
+                    onToggleWishlist: _wishlistController.toggleWishlist,
+                    isWishlisted: _wishlistController.isInWishlist,
                   ),
-                  if (!_isFiltering && hasMore) ...[
-                    const SizedBox(height: 16),
-                    Center(
-                      child: isLoadingMore
-                          ? const CircularProgressIndicator()
-                          : OutlinedButton(
-                              onPressed: _productController.loadMoreStorefrontProducts,
-                              child: const Text('Load More'),
-                            ),
+                  if (popular.isNotEmpty) ...[
+                    const SizedBox(height: 28),
+                    _ProductRail(
+                      title: 'Popular Picks',
+                      products: popular,
+                      onSeeAll: () => MainTabController.instance.goToShopping(),
+                      onProductTap: _navigateToProductDetails,
+                      onToggleWishlist: _wishlistController.toggleWishlist,
+                      isWishlisted: _wishlistController.isInWishlist,
                     ),
                   ],
                 ],
@@ -250,51 +184,91 @@ class _HomeTabState extends State<HomeTab> {
       );
     });
   }
+}
 
-  void _showCategoryPicker(BuildContext context, List<String> categories) {
-    showModalBottomSheet(
-      context: context,
-      builder: (context) => SafeArea(
-        child: ListView(
-          shrinkWrap: true,
-          children: categories
-              .map(
-                (cat) => ListTile(
-                  title: Text(cat),
-                  trailing: _selectedCategory == cat ? const Icon(Icons.check) : null,
-                  onTap: () {
-                    setState(() => _selectedCategory = cat);
-                    _ensureFullyLoadedIfFiltering();
-                    Navigator.pop(context);
-                  },
-                ),
-              )
-              .toList(),
+class _CategoryTile extends StatelessWidget {
+  const _CategoryTile({required this.label, required this.onTap});
+
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        width: 84,
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.category_outlined, color: theme.colorScheme.primary),
+            const SizedBox(height: 8),
+            Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600),
+            ),
+          ],
         ),
       ),
     );
   }
 }
 
-class _CategoryChip extends StatelessWidget {
-  const _CategoryChip({required this.label, required this.selected, required this.onTap});
+class _ProductRail extends StatelessWidget {
+  const _ProductRail({
+    required this.title,
+    required this.products,
+    required this.onSeeAll,
+    required this.onProductTap,
+    required this.onToggleWishlist,
+    required this.isWishlisted,
+  });
 
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
+  final String title;
+  final List<Product> products;
+  final VoidCallback onSeeAll;
+  final void Function(Product) onProductTap;
+  final void Function(Product) onToggleWishlist;
+  final bool Function(String) isWishlisted;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.only(right: 10.0),
-      child: ChoiceChip(
-        label: Text(label),
-        selected: selected,
-        onSelected: (_) => onTap(),
-        selectedColor: theme.colorScheme.primary,
-        labelStyle: TextStyle(color: selected ? Colors.white : null),
-      ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SectionHeader(title: title, actionLabel: 'View All', onAction: onSeeAll),
+        const SizedBox(height: 12),
+        SizedBox(
+          height: 260,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            itemCount: products.length,
+            separatorBuilder: (_, __) => const SizedBox(width: 12),
+            itemBuilder: (context, index) {
+              final product = products[index];
+              return SizedBox(
+                width: 160,
+                child: ProductCard(
+                  product: product,
+                  onTap: () => onProductTap(product),
+                  onToggleWishlist: () => onToggleWishlist(product),
+                  isWishlisted: isWishlisted(product.id),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
     );
   }
 }

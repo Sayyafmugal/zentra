@@ -3,6 +3,7 @@ import 'package:get/get.dart';
 import '../Controllers/product_controller.dart';
 import '../Controllers/wishlist_controller.dart';
 import '../Controllers/category_controller.dart';
+import '../Controllers/main_tab_controller.dart';
 import '../routes/app_routes.dart';
 import '../Utils/responsive.dart';
 import '../widgets/product_card.dart';
@@ -24,11 +25,21 @@ class _ShoppingTabState extends State<ShoppingTab> {
   int _selectedCategoryIdx = 0;
   String _query = '';
   bool _showSearch = false;
+  String? _pendingCategory;
 
   @override
   void initState() {
     super.initState();
     _productController.fetchStorefrontFirstPage();
+    // Arrived here via Home's "View All" / a category tap — consume the
+    // request once; a plain re-visit of the Shopping tab afterward keeps
+    // whatever the user picks here instead of re-applying a stale filter.
+    final tabController = MainTabController.instance;
+    final pending = tabController.pendingShoppingCategory.value;
+    if (pending.isNotEmpty) {
+      _pendingCategory = pending;
+      tabController.pendingShoppingCategory.value = '';
+    }
   }
 
   @override
@@ -80,6 +91,11 @@ class _ShoppingTabState extends State<ShoppingTab> {
       final isLoadingMore = _productController.isLoadingMoreStorefront.value;
 
       final categories = _computeCategories();
+      if (_pendingCategory != null && categories.contains(_pendingCategory)) {
+        _selectedCategoryIdx = categories.indexOf(_pendingCategory!);
+        _ensureFullyLoadedIfFiltering(_pendingCategory!);
+        _pendingCategory = null;
+      }
       final clampedIndex = categories.isEmpty
           ? 0
           : _selectedCategoryIdx.clamp(0, categories.length - 1);
