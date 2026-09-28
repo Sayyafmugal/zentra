@@ -7,12 +7,17 @@ class QuantitySelector extends StatelessWidget {
     required this.onIncrement,
     required this.onDecrement,
     this.minQuantity = 1,
+    this.canIncrement = true,
   });
 
   final int quantity;
   final VoidCallback onIncrement;
   final VoidCallback onDecrement;
   final int minQuantity;
+
+  /// False once [quantity] has reached the caller's known stock limit —
+  /// grays out the "+" button instead of letting it silently do nothing.
+  final bool canIncrement;
 
   @override
   Widget build(BuildContext context) {
@@ -33,7 +38,10 @@ class QuantitySelector extends StatelessWidget {
             width: 24,
             child: Text('$quantity', textAlign: TextAlign.center, style: theme.textTheme.bodyLarge),
           ),
-          IconButton(icon: const Icon(Icons.add, size: 18), onPressed: onIncrement),
+          IconButton(
+            icon: const Icon(Icons.add, size: 18),
+            onPressed: canIncrement ? onIncrement : null,
+          ),
         ],
       ),
     );

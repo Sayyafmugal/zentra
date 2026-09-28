@@ -86,6 +86,21 @@ class Product extends Equatable {
 
   bool get isInStock => stockQuantity == null || stockQuantity! > 0;
 
+  /// Stock for one specific size — the variant's own stock when this
+  /// product has variants (each size tracks separately), [totalStock]
+  /// otherwise. Null means untracked/always orderable, same convention as
+  /// [stockQuantity]. This is what a cart line item or the product details
+  /// screen should check, since [stockQuantity] alone (the sum across every
+  /// variant) can't tell whether the one size someone actually selected is
+  /// the one that's sold out.
+  int? stockForSize(String size) {
+    if (!hasVariants) return totalStock;
+    for (final variant in variants) {
+      if (variant.size == size) return variant.stock;
+    }
+    return 0;
+  }
+
   bool get isPublished => status == ProductStatus.published;
 
   Map<String, dynamic> toMap() {

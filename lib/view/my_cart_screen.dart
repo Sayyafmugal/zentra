@@ -142,6 +142,8 @@ class _CartRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final stock = item.product.stockForSize(item.selectedSize);
+    final canIncrement = stock == null || item.quantity < stock;
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -195,7 +197,12 @@ class _CartRow extends StatelessWidget {
             tooltip: 'Remove',
           ),
           const SizedBox(width: 4),
-          QuantitySelector(quantity: item.quantity, onIncrement: onPlus, onDecrement: onMinus),
+          QuantitySelector(
+            quantity: item.quantity,
+            onIncrement: onPlus,
+            onDecrement: onMinus,
+            canIncrement: canIncrement,
+          ),
         ],
       ),
     );
